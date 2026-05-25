@@ -42,25 +42,25 @@ Before generating this week's report, use the GitHub connector to fetch the most
 
 # Fetch protocol
 
-**Parallelism (required):** Issue independent fetches as parallel tool calls within a single message, not sequentially. Batch by source type:
+**Parallelism (required):** Issue independent fetches as parallel tool calls within a single message, not sequentially. If the runtime does not actually parallelize tool calls in one message, fall back to: emit a batch plan, then execute each batch at the runtime's highest available concurrency. Do not begin scoring until all required batches have returned. Batch by source type:
 
 - FRED series in one parallel batch
 - Market data (Yahoo, multpl, Cboe) in one parallel batch
 - Static scrapes (CNN F&G, AAII, slickcharts, etf.com, openinsider) in one parallel batch
 - News / web searches (BofA survey, JPM survey, IPO heat, +AI rename, leveraged ETF approvals across KRX / TWSE / JPX / ESMA) in one parallel batch
 
-**Coverage checklist (required):** For every bullet under `# Data sources`, fetch and mark ✓ or ⚠ FAILED (with a one-line reason). Do not begin scoring any dimension until all its required items are marked. FAILED items must appear in 數據附錄 with the actual error.
+**Coverage checklist (required):** For every bullet under `# Data sources`, fetch and mark ✓ or ⛔ FETCH FAILED (with a one-line reason). Do not begin scoring any dimension until all its required items are marked. FAILED items must appear in 數據附錄 with the actual error.
 
-Best-effort items — explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue when not disclosed this quarter) — may be marked ✗ NOT DISCLOSED instead of ⚠ FAILED.
+Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure.
 
-**Timeout policy:** If any single fetch exceeds ~90 seconds, mark ⚠ FAILED and move on. Never block report generation on one stuck source.
+**Timeout policy:** If any single fetch exceeds ~90 seconds, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
 
 # Data sources (fetch fresh data each run)
 
 ## Valuation
 
 - S&P 500 P/E and Shiller CAPE: multpl.com or gurufocus.com
-- Mag 7 weighted P/E and AI leader P/S vs 10-year averages
+- Mag 7 weighted P/E and AI leader P/S vs 10-year averages (Mag 7 = AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA)
 
 ## Breadth
 
@@ -87,28 +87,28 @@ Best-effort items — explicitly tagged in `# Data sources` (AI token volume gro
 - 10Y Treasury yield: FRED series DGS10
 - WTI crude oil price: FRED series DCOILWTICO
 - Fed balance sheet: FRED series WALCL
-- Global central bank liquidity cross-check: ECB balance sheet, BOJ balance sheet, and PBoC aggregate financing / liquidity operations
+- Global central bank liquidity cross-check: ECB balance sheet, BOJ balance sheet, and PBoC aggregate financing / liquidity operations (PBoC is best-effort; if no current PBoC/NBS English summary found, mark ✗ NOT DISCLOSED)
 
 ## AI Fundamentals
 
 - Hyperscaler capex guidance: latest quarterly earnings from MSFT, GOOGL, AMZN, META
   - Track current FY capex guidance vs prior quarter's guidance
 - AI token volume growth rate: search for reported metrics from Anthropic, OpenAI, Google quarterly disclosures (best-effort; cite if disclosed this quarter, else skip)
-- OpenAI / Anthropic annualized revenue: most recent public disclosure or press leak (The Information, Reuters, CNBC)
+- OpenAI / Anthropic annualized revenue: most recent public disclosure or press leak (The Information, Reuters, CNBC) (best-effort; if no current-quarter disclosure or credible press leak, mark ✗ NOT DISCLOSED)
 - Hyperscaler AI customer concentration: any disclosure on % of backlog from top AI customers (best-effort; usually qualitative from earnings calls)
 
 ## Speculative Behavior
 
 - Search for past 7 days: "AI rename" / "+AI ticker change" / SPAC announcement / no-revenue speculative IPO surge
 - IPO market heat: weekly IPO count, first-day return, and no-revenue / negative-EBITDA issuer share
-- Upcoming AI IPOs: OpenAI, Anthropic, xAI, SpaceX timing and valuation
+- Upcoming AI IPOs: OpenAI, Anthropic, xAI, SpaceX timing and valuation (cite concrete S-1 filing or named-source report within the past 30 days; if none, mark ✗ NOT DISCLOSED rather than reporting unsourced rumor)
 - Insider selling at AI / market-leadership companies: Form 4 clusters and sale-to-buy ratio
 
 ## Structural Leverage
 
 - US leveraged ETF AUM: etf.com / ETFGI database; at minimum track NVDL, TSLL, CONL, TQQQ, SOXL, and SQQQ
 - US single-stock leveraged ETF approvals: SEC EDGAR ETF filings and ETF.com new launches feed
-- Global leveraged product approvals: KRX / Korea FSC, TWSE / Taiwan FSC, JPX / Japan FSA, ESMA announcements, and ETFGI weekly reports
+- Global leveraged product approvals: KRX / Korea FSC, TWSE / Taiwan FSC, JPX / Japan FSA, ESMA announcements, and ETFGI weekly reports (Asian regulator feeds are fragmented and not published weekly; treat each regulator as best-effort and mark ✗ NOT DISCLOSED if no English-language disclosure found this week)
   - Record approving market / regulator, underlying stock, leverage multiple, inverse or long direction, and expected AUM / size if available
 - 0DTE option volume: CBOE daily market statistics; SpotGamma / Goldman Derivatives Insights summaries if public
 - Options total volume: OCC monthly volume report
