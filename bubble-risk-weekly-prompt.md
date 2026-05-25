@@ -20,8 +20,10 @@ If the invocation context contains the string `DRY RUN` or `DRY-RUN` (case-insen
 
 Before generating this week's report, use the GitHub connector to fetch the most recent prior week's data from the archive repo `moonape1226/bubble-risk-archive`:
 
-1. List files in the repo root, find the latest `scores-YYYY-Www.json` (sort by filename descending).
-2. Read its contents — schema:
+1. List all `scores-YYYY-Www.json` in the repo root.
+2. **Filter to entries whose week is strictly before the current ISO week** — this prevents a same-week RUN NOW re-run from reading its own earlier write.
+3. From the filtered list, sort by filename descending and take the latest.
+4. Read its contents — schema:
    ```json
    {
      "week": "2026-W21",
@@ -35,8 +37,8 @@ Before generating this week's report, use the GitHub connector to fetch the most
      "tier": "警戒"
    }
    ```
-3. Use these values as 上週分數 in 視覺化 §1 and compute Δ for each dimension.
-4. If the repo is empty, missing, or the fetch fails, mark this as 基準週 — the 上週 / Δ columns all fill —, and skip Δ-based ⚠ flags.
+5. Use these values as 上週分數 in 視覺化 §1 and compute Δ for each dimension.
+6. If the filtered list is empty, the repo is missing, or the fetch fails, mark this as 基準週 — the 上週 / Δ columns all fill —, and skip Δ-based ⚠ flags.
 
 # Data sources (fetch fresh data each run)
 
@@ -233,9 +235,14 @@ After all sections above, output a fenced JSON block (label `json`) for next wee
 }
 ```
 
-Then use the GitHub connector to write this JSON to `moonape1226/bubble-risk-archive` as `scores-<week>.json` (commit message: `weekly scores <week>`). Also commit the full report markdown as `report-<week>.md` for archival. If commit fails, state so explicitly at the end of the report; do not silently skip.
+Then use the GitHub connector to write this JSON to `moonape1226/bubble-risk-archive`:
 
-**Skip this commit step entirely if in dry-run mode** (see `# Run mode` at the top). The JSON block above should still be printed inline so the user can inspect it.
+1. Check if `scores-<week>.json` already exists for the current ISO week.
+2. **If it exists**: this is a same-week re-run (likely RUN NOW for testing). Default behavior is to **skip the commit step** to avoid commit log churn. Add a line to the report: `> Same-week file already exists in archive; commit skipped. Add 「FORCE COMMIT」 to the invocation context to overwrite.`
+3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: commit `scores-<week>.json` and `report-<week>.md` (commit message: `weekly scores <week>` or `weekly scores <week> [forced overwrite]`).
+4. If commit fails, state so explicitly at the end of the report; do not silently skip.
+
+**Skip this entire commit step if in dry-run mode** (see `# Run mode` at the top). The JSON block above should still be printed inline so the user can inspect it.
 
 ## 視覺化
 
