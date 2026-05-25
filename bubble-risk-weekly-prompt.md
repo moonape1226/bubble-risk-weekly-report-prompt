@@ -4,6 +4,18 @@ You are producing a weekly market bubble risk report in Traditional Chinese (zh-
 
 Generate a full six-dimension bubble risk assessment for the current week.
 
+# Run mode
+
+Default is **production** — write to the archive repo at the end of the run.
+
+If the invocation context contains the string `DRY RUN` or `DRY-RUN` (case-insensitive) anywhere, switch to **dry-run mode**:
+
+- Still fetch prior week data (read-only, harmless)
+- Generate the full report normally
+- Print the would-be JSON inline so the user can inspect it
+- **Skip the GitHub commit step entirely**
+- Add a single line at the top of the report: `> [DRY RUN] this report was not committed to archive.`
+
 # Prior week reference
 
 Before generating this week's report, use the GitHub connector to fetch the most recent prior week's data from the archive repo `moonape1226/bubble-risk-archive`:
@@ -222,6 +234,8 @@ After all sections above, output a fenced JSON block (label `json`) for next wee
 ```
 
 Then use the GitHub connector to write this JSON to `moonape1226/bubble-risk-archive` as `scores-<week>.json` (commit message: `weekly scores <week>`). Also commit the full report markdown as `report-<week>.md` for archival. If commit fails, state so explicitly at the end of the report; do not silently skip.
+
+**Skip this commit step entirely if in dry-run mode** (see `# Run mode` at the top). The JSON block above should still be printed inline so the user can inspect it.
 
 ## 視覺化
 
