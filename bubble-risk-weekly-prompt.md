@@ -40,6 +40,21 @@ Before generating this week's report, use the GitHub connector to fetch the most
 5. Use these values as 上週分數 in 視覺化 §1 and compute Δ for each dimension.
 6. If the filtered list is empty, the repo is missing, or the fetch fails, mark this as 基準週 — the 上週 / Δ columns all fill —, and skip Δ-based ⚠ flags.
 
+# Fetch protocol
+
+**Parallelism (required):** Issue independent fetches as parallel tool calls within a single message, not sequentially. Batch by source type:
+
+- FRED series in one parallel batch
+- Market data (Yahoo, multpl, Cboe) in one parallel batch
+- Static scrapes (CNN F&G, AAII, slickcharts, etf.com, openinsider) in one parallel batch
+- News / web searches (BofA survey, JPM survey, IPO heat, +AI rename, leveraged ETF approvals across KRX / TWSE / JPX / ESMA) in one parallel batch
+
+**Coverage checklist (required):** For every bullet under `# Data sources`, fetch and mark ✓ or ⚠ FAILED (with a one-line reason). Do not begin scoring any dimension until all its required items are marked. FAILED items must appear in 數據附錄 with the actual error.
+
+Best-effort items — explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue when not disclosed this quarter) — may be marked ✗ NOT DISCLOSED instead of ⚠ FAILED.
+
+**Timeout policy:** If any single fetch exceeds ~90 seconds, mark ⚠ FAILED and move on. Never block report generation on one stuck source.
+
 # Data sources (fetch fresh data each run)
 
 ## Valuation
