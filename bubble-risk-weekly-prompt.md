@@ -250,12 +250,25 @@ After all sections above, output a fenced JSON block (label `json`) for next wee
 }
 ```
 
-Then use the GitHub connector to write this JSON to `moonape1226/bubble-risk-archive`:
+Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub connector's file-write API** (the connector tool that creates or updates file contents through a single API call). The routine must complete this commit autonomously inside the same session — it is the routine's job, not the user's.
 
-1. Check if `scores-<week>.json` already exists for the current ISO week.
+**Strictly forbidden:**
+
+- Do NOT clone the repo to local disk, `/tmp`, or any working directory
+- Do NOT run `git` CLI commands (`git clone`, `git add`, `git commit`, `git push`)
+- Do NOT ask the user to run shell commands or `git push` manually
+- Do NOT print a PAT, token, or personal access credential anywhere in the report
+- Do NOT defer the commit with phrases like "請執行以下指令完成推送"
+
+**Required behavior:**
+
+1. Check if `scores-<week>.json` already exists at the repo root for the current ISO week (use the connector's read/list API).
 2. **If it exists**: this is a same-week re-run (likely RUN NOW for testing). Default behavior is to **skip the commit step** to avoid commit log churn. Add a line to the report: `> Same-week file already exists in archive; commit skipped. Add 「FORCE COMMIT」 to the invocation context to overwrite.`
-3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: commit `scores-<week>.json` and `report-<week>.md` (commit message: `weekly scores <week>` or `weekly scores <week> [forced overwrite]`).
-4. If commit fails, state so explicitly at the end of the report; do not silently skip.
+3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: use the connector's create-or-update-file operation to write both files at the repo root (not under any subfolder):
+   - `scores-<week>.json` — the JSON block above
+   - `report-<week>.md` — the full markdown report
+   - Commit message: `weekly scores <week>` (or `weekly scores <week> [forced overwrite]` when overwriting)
+4. If the connector call fails (auth, rate limit, network), state the actual error at the end of the report; do not silently skip and do not fall back to local git.
 
 **Skip this entire commit step if in dry-run mode** (see `# Run mode` at the top). The JSON block above should still be printed inline so the user can inspect it.
 
