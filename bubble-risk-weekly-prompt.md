@@ -275,10 +275,11 @@ Generate all report sections, including the 視覺化 section below, before invo
 
 1. Check if `scores-<week>.json` already exists at the repo root for the current ISO week (use the connector's read/list API).
 2. **If it exists**: this is a same-week re-run (likely RUN NOW for testing). Default behavior is to **skip the commit step** to avoid commit log churn. Add a line to the report: `> Same-week file already exists in archive; commit skipped. Add 「FORCE COMMIT」 to the invocation context to overwrite.`
-3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: use the connector's create-or-update-file operation to write both files at the repo root (not under any subfolder):
+3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: use the connector's create-or-update-file operation to write both files at the repo root (not under any subfolder), committing **directly to the `main` branch**. Do not open a pull request, do not create a feature branch, do not request review — this is an automated weekly archive, not a code change. Write:
    - `scores-<week>.json` — the JSON block above
    - `report-<week>.md` — the full markdown report
    - Commit message: `weekly scores <week>` (or `weekly scores <week> [forced overwrite]` when overwriting)
+   - Branch: `main` (direct commit, no PR)
 4. If the connector call fails (auth, rate limit, network), state the actual error at the end of the report; do not silently skip and do not fall back to local git, gh CLI, or any other write method.
 5. If no GitHub connector file-read / file-write tool is available in the runtime at all, state: `GitHub connector unavailable in this environment; enable the GitHub connector in routine settings and rerun.` Then leave the report and JSON inline, with no fallback commit attempt.
 
