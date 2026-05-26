@@ -22,8 +22,9 @@ Before generating this week's report, use the GitHub connector to fetch the most
 
 1. List all folders matching `report-YYYY-Www/` at the repo root.
 2. **Filter to folders whose week is strictly before the current ISO week** — this prevents a same-week RUN NOW re-run from reading its own earlier write.
-3. From the filtered list, sort by folder name descending and take the latest.
-4. Read `report-<latest>/score.json` — schema:
+3. From the filtered list, sort by folder name descending.
+4. Starting from the latest folder, read `report-<candidate>/score.json`. If that file is missing, unreadable, or cannot be parsed as valid JSON matching the schema below, skip that folder and try the next older candidate. Do not treat a partial folder as the prior week.
+5. Use the first candidate with a valid `score.json` as the prior-week reference — schema:
    ```json
    {
      "week": "2026-W21",
@@ -37,8 +38,8 @@ Before generating this week's report, use the GitHub connector to fetch the most
      "tier": "警戒"
    }
    ```
-5. Use these values as 上週分數 in 視覺化 §1 and compute Δ for each dimension.
-6. If the filtered list is empty, the repo is missing, or the fetch fails, mark this as 基準週 — the 上週 / Δ columns all fill —, and skip Δ-based ⚠ flags.
+6. Use these values as 上週分數 in 視覺化 §1 and compute Δ for each dimension.
+7. If the filtered list is empty, the repo is missing, or every candidate folder lacks a usable `score.json`, mark this as 基準週 — the 上週 / Δ columns all fill —, and skip Δ-based ⚠ flags.
 
 # Fetch protocol
 
@@ -141,6 +142,52 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 10. `## 數據附錄` — raw data + SEARCH-VERIFIED tracking entries (see Fetch protocol)
 11. `## 本週分數存檔` — the fenced JSON block (see Persistence spec)
 12. Closing disclaimer line: `本報告為相對風險溫度計，非擇時訊號。`
+
+For every mandatory item above: if current evidence is unavailable or a source fails, keep the heading / item in place and use the section-appropriate placeholder (`本週無...資料`, `基準週`, `FETCH FAILED`, or `—`). Skipping a mandatory heading is forbidden under any condition.
+
+**Report skeleton lock — before drafting, instantiate this skeleton and fill it in. Keep every heading below exactly as written, in this order. Do not print extra top-level or second-level sections, and do not merge adjacent sections:**
+
+````markdown
+# <YYYY-Www> 市場泡沫風險評估週報
+> 報告日期：<YYYY-MM-DD>；週次：<YYYY-Www>；上週基準：<report-YYYY-Www or 基準週>
+
+## §1 六維度風險條圖
+| 維度 | 條圖 | 本週 | 上週 | Δ |
+
+## §2 歷史錨點相似度
+| 錨點 | 相似度 | 條圖 | 標記 |
+
+## §3 三角訊號
+| 指標 | 當週數值 | vs 上週 |
+<short interpretation paragraph>
+
+## 六維度評分
+
+## 綜合分數
+
+## 歷史泡沫週期對比
+
+## 機構情緒對照
+
+## 本週新增訊號
+
+## 數據附錄
+
+## 本週分數存檔
+```json
+<score JSON>
+```
+
+本報告為相對風險溫度計，非擇時訊號。
+````
+
+**Internal self-check before final output (do not print this checklist):**
+
+- The report contains exactly the 12 mandatory items above, with no renamed, missing, duplicated, or merged sections.
+- §1 / §2 / §3 use only their required columns; rationale and sources are outside the visualization tables.
+- `## 六維度評分` and `## 綜合分數` remain independent sections after §3.
+- `## 機構情緒對照` is always emitted, even when it only says `本週無新機構調查數據。`
+- The final visible line is exactly `本報告為相對風險溫度計，非擇時訊號。`
 
 **Hard rules for the visualization tables (§1 / §2 / §3):**
 
@@ -252,7 +299,7 @@ If new BofA Fund Manager Survey or JPM institutional survey was released since l
 - Cash levels
 - Note: high consensus expectation of a future crash is itself a contrarian signal. AAII may be mentioned only as retail contrast, not as institutional data.
 
-If no new data this week, state "本週無新機構調查數據" and skip section.
+If no new data this week, still emit this section heading and state: "本週無新機構調查數據。"
 
 ## 本週新增訊號
 
@@ -282,7 +329,7 @@ After all sections above, output a fenced JSON block (label `json`) for next wee
 }
 ```
 
-Generate all report sections, including the 視覺化 section below, before invoking the archive write. Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub connector's file-write API** (the connector tool that creates or updates file contents through a single API call). The routine must complete this commit autonomously inside the same session — it is the routine's job, not the user's.
+Generate all report sections, including the 視覺化 section below, before invoking the archive write. Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub connector's file-write API**. If the connector supports a multi-file tree commit, write `score.json` and `report.md` in one commit. If the connector only supports create-or-update for one file per API call, two consecutive single-file commits directly to `main` are acceptable and expected. The routine must complete these write(s) autonomously inside the same session — it is the routine's job, not the user's.
 
 **Strictly forbidden:**
 
@@ -291,13 +338,13 @@ Generate all report sections, including the 視覺化 section below, before invo
 - Do NOT ask the user to run shell commands or `git push` manually
 - Do NOT print a PAT, token, or personal access credential anywhere in the report
 - Do NOT defer the commit with phrases like "請執行以下指令完成推送"
-- Do NOT use any write method other than the GitHub connector's create-or-update-file operation. This includes gh CLI, GitPython / libgit2 / pygit2, subprocess wrappers around git, and direct curl / HTTP calls to the GitHub REST or Contents API.
+- Do NOT use any write method other than the GitHub connector's file-write operation(s). This includes gh CLI, GitPython / libgit2 / pygit2, subprocess wrappers around git, and direct curl / HTTP calls to the GitHub REST or Contents API.
 
 **Required behavior:**
 
 1. Check if folder `report-<week>/` already exists for the current ISO week (use the connector's read/list API — listing the folder or checking for `report-<week>/score.json` both work).
 2. **If it exists**: this is a same-week re-run (likely RUN NOW for testing). Default behavior is to **skip the commit step** to avoid commit log churn. Add a line to the report: `> Same-week folder already exists in archive; commit skipped. Add 「FORCE COMMIT」 to the invocation context to overwrite.`
-3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: use the connector's create-or-update-file operation to write both files under one folder per week, committing **directly to the `main` branch**. Do not open a pull request, do not create a feature branch, do not request review — this is an automated weekly archive, not a code change. Write:
+3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: use the connector's file-write operation(s) to write both files under one folder per week, committing **directly to the `main` branch**. Prefer one multi-file commit if supported; otherwise make two consecutive single-file commits as one archive-write step. Do not re-run the same-week skip check between the two file writes. Do not open a pull request, do not create a feature branch, do not request review — this is an automated weekly archive, not a code change. Write:
    - `report-<week>/score.json` — the JSON block above
    - `report-<week>/report.md` — the full markdown report
    - Commit message: `weekly archive <week>` (or `weekly archive <week> [forced overwrite]` when overwriting)
