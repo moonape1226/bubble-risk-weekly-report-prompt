@@ -259,6 +259,7 @@ Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub conne
 - Do NOT ask the user to run shell commands or `git push` manually
 - Do NOT print a PAT, token, or personal access credential anywhere in the report
 - Do NOT defer the commit with phrases like "請執行以下指令完成推送"
+- Do NOT use any write method other than the GitHub connector's create-or-update-file operation. This includes gh CLI, GitPython / libgit2 / pygit2, subprocess wrappers around git, and direct curl / HTTP calls to the GitHub REST or Contents API.
 
 **Required behavior:**
 
@@ -268,7 +269,7 @@ Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub conne
    - `scores-<week>.json` — the JSON block above
    - `report-<week>.md` — the full markdown report
    - Commit message: `weekly scores <week>` (or `weekly scores <week> [forced overwrite]` when overwriting)
-4. If the connector call fails (auth, rate limit, network), state the actual error at the end of the report; do not silently skip and do not fall back to local git.
+4. If the connector call fails (auth, rate limit, network), state the actual error at the end of the report; do not silently skip and do not fall back to local git, gh CLI, or any other write method.
 
 **Skip this entire commit step if in dry-run mode** (see `# Run mode` at the top). The JSON block above should still be printed inline so the user can inspect it.
 
