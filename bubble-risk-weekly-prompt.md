@@ -42,24 +42,34 @@ Before generating this week's report, use the GitHub connector to fetch the most
 
 # Fetch protocol
 
-**Parallelism (required):** Issue independent fetches as parallel tool calls within a single message, not sequentially. If the runtime does not actually parallelize tool calls in one message, fall back to: emit a batch plan, then execute each batch at the runtime's highest available concurrency. Do not begin scoring until all required batches have returned. Batch by source type:
+**Parallelism (required):** Issue independent fetches / searches as parallel tool calls within a single message, not sequentially. If the runtime does not actually parallelize tool calls in one message, fall back to: emit a batch plan, then execute each batch at the runtime's highest available concurrency. Do not begin scoring until all required batches have returned. Batch by source type:
 
-- FRED series in one parallel batch
-- Market data (Yahoo, multpl, Cboe) in one parallel batch
-- Static scrapes (CNN F&G, AAII, slickcharts, etf.com, openinsider) in one parallel batch
+- FRED series in one parallel batch, preferring FRED API / JSON / CSV endpoints over scraping web pages
+- Market data (Yahoo, multpl / GuruFocus, Cboe) in one parallel batch
+- Static / often-blocked pages (CNN F&G, AAII, slickcharts, etf.com, openinsider) in one WebSearch-primary batch; WebFetch is optional confirmation, not required for success
 - News / web searches (BofA survey, JPM survey, IPO heat, +AI rename, leveraged ETF approvals across KRX / TWSE / JPX / ESMA) in one parallel batch
 
-**Coverage checklist (required):** For every bullet under `# Data sources`, fetch and mark ✓ or ⛔ FETCH FAILED (with a one-line reason). Do not begin scoring any dimension until all its required items are marked. FAILED items must appear in 數據附錄 with the actual error.
+**Coverage checklist (required):** For every bullet under `# Data sources`, attempt the preferred retrieval method and mark one final status. Do not begin scoring any dimension until all its required items are marked.
+
+- `✓ API` — obtained from an official machine-readable endpoint such as FRED API / JSON / CSV.
+- `✓ DIRECT` — obtained from the named source by WebFetch or equivalent direct page access.
+- `✓ SEARCH-VERIFIED` — obtained through WebSearch because the named source is search-oriented, dynamically rendered, or blocked by WebFetch. This is a successful retrieval, not a fetch failure, but the appendix must show traceability.
+- `✗ NOT DISCLOSED` — best-effort item has no current disclosure.
+- `⛔ FETCH FAILED` — no usable current value was obtained from direct fetch, API, or WebSearch.
+
+For `✓ SEARCH-VERIFIED`, record in 數據附錄: search query, result title, result URL, publisher/source, publication or data date if visible, retrieval timestamp, and the originally intended source. If WebFetch returned 403 but WebSearch found a current usable value, do not label the item ⛔; mention the direct-fetch 403 only in the appendix note.
+
+**Source-preferred method:** Data-source bullets may include a `[primary: ...]` tag. Known-403 / WAF-protected sources tagged `[primary: SEARCH]` should use WebSearch first, without spending a mandatory WebFetch round. FRED sources tagged `[primary: API]` should use a keyless endpoint such as `https://fred.stlouisfed.org/graph/fredgraph.csv?id=<SERIES>`. Untagged sources default to `[primary: DIRECT]` with `✓ SEARCH-VERIFIED` as an allowed secondary path.
 
 Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure.
 
-**Timeout policy:** If any single fetch exceeds ~90 seconds, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
+**Timeout policy:** If any single direct fetch exceeds ~90 seconds, try the source's API or WebSearch path if available. If no path returns a current usable value, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
 
 # Data sources (fetch fresh data each run)
 
 ## Valuation
 
-- S&P 500 P/E and Shiller CAPE: multpl.com or gurufocus.com
+- S&P 500 P/E and Shiller CAPE: multpl.com or gurufocus.com [primary: SEARCH] (record the exact result URL / date)
 - Mag 7 weighted P/E and AI leader P/S vs 10-year averages (Mag 7 = AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA)
 
 ## Breadth
@@ -70,9 +80,9 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 
 ## Retail Sentiment
 
-- CNN Fear & Greed Index: cnn.com/markets/fear-and-greed
+- CNN Fear & Greed Index: cnn.com/markets/fear-and-greed [primary: SEARCH] (record the exact result URL / date)
 - Margin Debt: FINRA monthly data
-- Retail survey: AAII Investor Sentiment
+- Retail survey: AAII Investor Sentiment [primary: SEARCH]
 - Social sentiment proxies: Reddit r/wallstreetbets top weekly posts, X (Twitter) cashtag chatter on meme tickers
 
 ## Institutional Sentiment
@@ -81,12 +91,12 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 
 ## Monetary & Credit
 
-- Fed funds rate: FRED series DFEDTARU and DFEDTARL
-- High Yield OAS: FRED series BAMLH0A0HYM2
-- Investment Grade OAS: FRED series BAMLC0A0CM
-- 10Y Treasury yield: FRED series DGS10
-- WTI crude oil price: FRED series DCOILWTICO
-- Fed balance sheet: FRED series WALCL
+- Fed funds rate: FRED series DFEDTARU and DFEDTARL [primary: API, fredgraph.csv?id=DFEDTARU / DFEDTARL]
+- High Yield OAS: FRED series BAMLH0A0HYM2 [primary: API, fredgraph.csv?id=BAMLH0A0HYM2]
+- Investment Grade OAS: FRED series BAMLC0A0CM [primary: API, fredgraph.csv?id=BAMLC0A0CM]
+- 10Y Treasury yield: FRED series DGS10 [primary: API, fredgraph.csv?id=DGS10]
+- WTI crude oil price: FRED series DCOILWTICO [primary: API, fredgraph.csv?id=DCOILWTICO]
+- Fed balance sheet: FRED series WALCL [primary: API, fredgraph.csv?id=WALCL]
 - Global central bank liquidity cross-check: ECB balance sheet, BOJ balance sheet, and PBoC aggregate financing / liquidity operations (PBoC is best-effort; if no current PBoC/NBS English summary found, mark ✗ NOT DISCLOSED)
 
 ## AI Fundamentals
@@ -102,11 +112,11 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 - Search for past 7 days: "AI rename" / "+AI ticker change" / SPAC announcement / no-revenue speculative IPO surge
 - IPO market heat: weekly IPO count, first-day return, and no-revenue / negative-EBITDA issuer share
 - Upcoming AI IPOs: OpenAI, Anthropic, xAI, SpaceX timing and valuation (cite concrete S-1 filing or named-source report within the past 30 days; if none, mark ✗ NOT DISCLOSED rather than reporting unsourced rumor)
-- Insider selling at AI / market-leadership companies: Form 4 clusters and sale-to-buy ratio
+- Insider selling at AI / market-leadership companies: Form 4 clusters and sale-to-buy ratio [primary: SEC EDGAR]. Every named insider or dollar-amount claim must include Form 4 filing date, transaction date, issuer ticker, SEC EDGAR filing URL, and sale/buy amount within the past 14 days. If those filing-level details are not available within the past 14 days, mark ✗ NOT DISCLOSED and do not report stale names or dollar amounts from older news.
 
 ## Structural Leverage
 
-- US leveraged ETF AUM: etf.com / ETFGI database; at minimum track NVDL, TSLL, CONL, TQQQ, SOXL, and SQQQ
+- US leveraged ETF AUM: etf.com / ETFGI database [primary: SEARCH]; at minimum track NVDL, TSLL, CONL, TQQQ, SOXL, and SQQQ
 - US single-stock leveraged ETF approvals: SEC EDGAR ETF filings and ETF.com new launches feed
 - Global leveraged product approvals: KRX / Korea FSC, TWSE / Taiwan FSC, JPX / Japan FSA, ESMA announcements, and ETFGI weekly reports (Asian regulator feeds are fragmented and not published weekly; treat each regulator as best-effort and mark ✗ NOT DISCLOSED if no English-language disclosure found this week)
   - Record approving market / regulator, underlying stock, leverage multiple, inverse or long direction, and expected AUM / size if available
@@ -270,6 +280,7 @@ Generate all report sections, including the 視覺化 section below, before invo
    - `report-<week>.md` — the full markdown report
    - Commit message: `weekly scores <week>` (or `weekly scores <week> [forced overwrite]` when overwriting)
 4. If the connector call fails (auth, rate limit, network), state the actual error at the end of the report; do not silently skip and do not fall back to local git, gh CLI, or any other write method.
+5. If no GitHub connector file-read / file-write tool is available in the runtime at all, state: `GitHub connector unavailable in this environment; enable the GitHub connector in routine settings and rerun.` Then leave the report and JSON inline, with no fallback commit attempt.
 
 **Skip this entire commit step if in dry-run mode** (see `# Run mode` at the top). The JSON block above should still be printed inline so the user can inspect it.
 
@@ -339,6 +350,8 @@ Generate all report sections, including the 視覺化 section below, before invo
 # Constraints
 
 - Source-cite every numeric claim with URL or FRED series ID.
-- If a data source is unreachable, state so explicitly; do not fabricate.
+- Source-cite every time-sensitive concrete claim used for scoring deltas or weekly event signals with a source date inside the relevant window: past 14 days for insider transactions, IPO filings / timing, and ETF approvals / launches; past 7 days for weekly news events. If the source date is stale, missing, or ambiguous, use it only as background context and do not factor it into scoring deltas or "本週新增訊號". Stock-of-state indicators such as CAPE, P/E, margin debt level, and AUM level are exempt from the within-window publication-date rule, but still need a current snapshot date.
+- If a data source is unreachable and no API or WebSearch path obtains a current usable value, state so explicitly; do not fabricate.
+- Do not report named insider-selling claims unless supported by SEC EDGAR Form 4 filing URLs and filing / transaction dates from the past 14 days.
 - Do not extend signals to specific trading strategies or holdings unless explicitly asked.
 - End every report with: "本報告為相對風險溫度計，非擇時訊號。"
