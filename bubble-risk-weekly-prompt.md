@@ -127,6 +127,28 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 
 # Output structure
 
+**Mandatory section order — emit exactly these sections in this exact order. Do not merge, reorder, drop, or rename:**
+
+1. Report title (`# <YYYY-Www> 市場泡沫風險評估週報` plus a one-line meta with 報告日期、週次、上週基準/基準週)
+2. `## §1 六維度風險條圖` — chart only (see 視覺化 spec below for exact columns)
+3. `## §2 歷史錨點相似度` — chart only
+4. `## §3 三角訊號` — chart plus a short interpretation paragraph
+5. `## 六維度評分` — separate rationale table or per-dimension subsections, with sources and dates (not folded into §1)
+6. `## 綜合分數` — explicit weight × score table that sums to total + risk tier
+7. `## 歷史泡沫週期對比` — narrative interpretation referencing §2 (not just the §2 table again)
+8. `## 機構情緒對照`
+9. `## 本週新增訊號` — Δ deltas and trigger events; if 基準週, say so
+10. `## 數據附錄` — raw data + SEARCH-VERIFIED tracking entries (see Fetch protocol)
+11. `## 本週分數存檔` — the fenced JSON block (see Persistence spec)
+12. Closing disclaimer line: `本報告為相對風險溫度計，非擇時訊號。`
+
+**Hard rules for the visualization tables (§1 / §2 / §3):**
+
+- §1 must use exactly these columns: `維度 | 條圖 | 本週 | 上週 | Δ`. No extra columns (no `核心論述`, no `來源`, no `權重` inline). Rationale and sources belong in `## 六維度評分`, not §1.
+- §2 must use exactly: `錨點 | 相似度 | 條圖 | 標記`. No extra columns (no `核心類比特徵`).
+- §3 must use exactly: `指標 | 當週數值 | vs 上週`.
+- Do not fold `## 六維度評分` or `## 綜合分數` into the §1 table. They are separate sections by design — §1 is a glance-able heatmap, the rationale tables are the audit trail.
+
 ## 六維度評分
 
 For each dimension, give a score 0-100 and a one-sentence rationale citing specific data points with sources.
@@ -285,7 +307,9 @@ Generate all report sections, including the 視覺化 section below, before invo
 
 **Skip this entire commit step if in dry-run mode** (see `# Run mode` at the top). The JSON block above should still be printed inline so the user can inspect it.
 
-## 視覺化
+## 視覺化規格（§1 / §2 / §3 渲染細節）
+
+This subsection defines how §1 / §2 / §3 must be rendered. They appear at the **top** of the report per the Mandatory section order above, not here. Do not emit a second copy below.
 
 三個區塊一律使用 **Markdown 表格**呈現，由 Markdown 渲染器處理欄寬對齊。
 
