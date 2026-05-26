@@ -209,7 +209,7 @@ For each of the following reference points, give a similarity percentage and a o
 - 2000 March (peak)
 - 2021 December (meme + zero-rate peak)
 
-Then provide a 2-sentence interpretation: which historical phase does the current week most resemble, and what does that imply about position in the cycle? The similarity assessment should include the 結構性槓桿 dimension, especially for 1999 / 2000 March / 2021 December comparisons.
+Then provide a 2-sentence interpretation: which historical phase does the current week most resemble, and what does that imply about position in the cycle? The similarity assessment should include the 結構性槓桿 dimension, especially for 1999 / 2000 March / 2021 December comparisons. Interpret 結構性槓桿 in period-adjusted terms rather than requiring identical instruments: for 1999 / 2000 March, use proxies such as margin debt, index futures / options speculation, and retail leverage; for 2021 December, use meme leverage, options / 0DTE where available, and leveraged product adoption.
 
 ## 機構情緒對照
 
@@ -250,7 +250,7 @@ After all sections above, output a fenced JSON block (label `json`) for next wee
 }
 ```
 
-Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub connector's file-write API** (the connector tool that creates or updates file contents through a single API call). The routine must complete this commit autonomously inside the same session — it is the routine's job, not the user's.
+Generate all report sections, including the 視覺化 section below, before invoking the archive write. Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub connector's file-write API** (the connector tool that creates or updates file contents through a single API call). The routine must complete this commit autonomously inside the same session — it is the routine's job, not the user's.
 
 **Strictly forbidden:**
 
