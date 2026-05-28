@@ -62,7 +62,7 @@ For `✓ SEARCH-VERIFIED`, record in 數據附錄: search query, result title, r
 
 **Source-preferred method:** Data-source bullets may include a `[primary: ...]` tag. Known-403 / WAF-protected sources tagged `[primary: SEARCH]` should use WebSearch first, without spending a mandatory WebFetch round. FRED sources tagged `[primary: API]` should use a keyless endpoint such as `https://fred.stlouisfed.org/graph/fredgraph.csv?id=<SERIES>`. Untagged sources default to `[primary: DIRECT]` with `✓ SEARCH-VERIFIED` as an allowed secondary path.
 
-Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure.
+Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure.
 
 **Timeout policy:** If any single direct fetch exceeds ~90 seconds, try the source's API or WebSearch path if available. If no path returns a current usable value, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
 
@@ -72,6 +72,7 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 
 - S&P 500 P/E and Shiller CAPE: multpl.com or gurufocus.com [primary: SEARCH] (record the exact result URL / date)
 - Mag 7 weighted P/E and AI leader P/S vs 10-year averages (Mag 7 = AAPL, MSFT, NVDA, AMZN, GOOGL, META, TSLA)
+- **Analyst TP upgrade decomposition for Mag 7 / TSMC / AI semi bellwethers [primary: SEARCH]** (best-effort): scan top-tier sell-side TP raises in the past 14 days (Morgan Stanley, Goldman Sachs, JPMorgan, Bernstein, BofA, UBS) and split each upgrade into (a) EPS-revision contribution and (b) target-PE-expansion contribution. Decomposition: `ΔTP ≈ ΔEPS × PE_old + ΔPE × EPS_new`. Record analyst, ticker, old TP → new TP, EPS estimate Δ, target PE Δ, which component dominates, and the analyst's stated rationale. Sources: Bloomberg / Reuters / CNBC / MarketWatch summaries; Taiwan: 經濟日報 / udn money / cnyes. If no qualifying upgrade in 14d, mark ✗ NOT DISCLOSED.
 
 ## Breadth
 
@@ -208,6 +209,7 @@ Score based on:
 - S&P 500 P/E, Shiller CAPE vs 10-year average (primary)
 - Mag 7 weighted P/E vs historical
 - AI fundamentals reality check: is hyperscaler capex guidance still being raised? Is token growth sustaining? If capex guidance starts being cut, valuation risk rises sharply even if P/E unchanged.
+- **TP-upgrade phase signal**: classify each major sell-side TP raise on Mag 7 / TSMC / AI semi bellwethers this period as (a) **EPS-driven** — target PE roughly stable, upgrade explained by earnings revision — or (b) **multiple-driven** — target PE expands while EPS revision is modest, often justified by "long-duration AI demand" / "structural re-rating" / "should trade at premium to historical band". Multiple-driven upgrades happening across 2+ bellwethers in the same quarter is a late-cycle signal (price chases narrative-based PE re-rating, not earnings). Calibration anchor: 2026-Q2 Morgan Stanley TSMC raise argued 20–30× target PE is reasonable while the EPS revision did less lifting than the PE expansion itself. Caveat: a structural re-rating from cyclical-semi to AI-infrastructure-utility can partially justify multiple expansion — do not auto-flag any PE rise as bubble, but do flag when the dominant lever of TP upgrades shifts from E to multiple across multiple names.
 
 ### 2. 市場廣度 (weight 13%)
 
