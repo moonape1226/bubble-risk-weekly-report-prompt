@@ -112,6 +112,7 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 
 - Search for past 7 days: "AI rename" / "+AI ticker change" / SPAC announcement / no-revenue speculative IPO surge
 - IPO market heat: weekly IPO count, first-day return, and no-revenue / negative-EBITDA issuer share
+- **Microcap thematic moonshots [primary: SEARCH]**: scan the week's biggest single-day stock movers for tickers under $1B market cap that gained ≥100% in one session (or sustained ≥50% over 2-3 sessions). Qualify the move as a moonshot signal only if the catalyst is a press release / 8-K / corporate announcement that stacks **two or more** hot themes (e.g. quantum computing, AI, lunar / space / NASA, fusion, robotics, defense, autonomous, nuclear, gene editing, weight-loss, crypto-treasury) **against weak fundamentals** (most recent quarterly revenue ≤ $5M, negative EBITDA, low cash). For each qualifying ticker record: ticker, single-day %, market cap, stacked themes, last-quarter revenue, cash position, and the source press release URL. Sources: Finviz biggest-gainers screener, Benzinga / MarketWatch movers, Yahoo Finance day's gainers, StockTwits trending. Example pattern (Astrotech ASTC, 2026-05-27, +516%): quantum + lunar + NASA stacked on quarterly revenue $343k.
 - Upcoming AI IPOs: OpenAI, Anthropic, xAI, SpaceX timing and valuation (cite concrete S-1 filing or named-source report within the past 30 days; if none, mark ✗ NOT DISCLOSED rather than reporting unsourced rumor)
 - Insider selling at AI / market-leadership companies: Form 4 clusters and sale-to-buy ratio [primary: SEC EDGAR]. Every named insider or dollar-amount claim must include Form 4 filing date, transaction date, issuer ticker, SEC EDGAR filing URL, and sale/buy amount within the past 14 days. If those filing-level details are not available within the past 14 days, mark ✗ NOT DISCLOSED and do not report stale names or dollar amounts from older news.
 
@@ -223,7 +224,7 @@ Score based on:
 - +AI rename cases this week
 - SPAC / shell IPO activity
 - IPO count, first-day pop, and no-revenue / negative-EBITDA issuer share
-- No-revenue stock surges among existing tickers, separate from IPO issuer share above
+- Microcap thematic moonshots this week (see Data sources for screening criteria: ≥100% single-day, <$1B cap, 2+ stacked hot themes, weak fundamentals). Count and name each qualifying ticker. This is the primary indicator for the "no-revenue stock surge" category — historical bubble peaks (1999, 2021/12) saw multiple moonshots per week
 - Insider selling clusters among AI / market leaders
 - OpenAI / Anthropic revenue trajectory (concentration risk indicator)
 - Upcoming mega-IPO pipeline (liquidity drain risk)
