@@ -62,7 +62,7 @@ For `✓ SEARCH-VERIFIED`, record in 數據附錄: search query, result title, r
 
 **Source-preferred method:** Data-source bullets may include a `[primary: ...]` tag. Known-403 / WAF-protected sources tagged `[primary: SEARCH]` should use WebSearch first, without spending a mandatory WebFetch round. FRED sources tagged `[primary: API]` should use a keyless endpoint such as `https://fred.stlouisfed.org/graph/fredgraph.csv?id=<SERIES>`. Untagged sources default to `[primary: DIRECT]` with `✓ SEARCH-VERIFIED` as an allowed secondary path.
 
-Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure.
+Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition, AI infrastructure debt financing / vendor-financing loops) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure.
 
 **Timeout policy:** If any single direct fetch exceeds ~90 seconds, try the source's API or WebSearch path if available. If no path returns a current usable value, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
 
@@ -83,7 +83,7 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 ## Retail Sentiment
 
 - CNN Fear & Greed Index: cnn.com/markets/fear-and-greed [primary: SEARCH] (record the exact result URL / date)
-- Margin Debt: FINRA monthly data
+- Margin Debt: FINRA monthly data; also compute margin debt / total US equity market cap (Wilshire 5000 / FRED WILL5000IND if available, or S&P 500 market cap proxy) to avoid scoring absolute debt level alone
 - Retail survey: AAII Investor Sentiment [primary: SEARCH]
 - Social sentiment proxies: Reddit r/wallstreetbets top weekly posts, X (Twitter) cashtag chatter on meme tickers
 
@@ -126,7 +126,8 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 - 0DTE option volume: CBOE daily market statistics; SpotGamma / Goldman Derivatives Insights summaries if public
 - Options total volume: OCC monthly volume report
 - Cross-asset derivatives / correlation checks: VIX term structure, Cboe SKEW, and rolling stock-bond correlation
-- Cross-reference only: FINRA margin debt or FRED series BOGZ1FL073164003.Q (primary scoring remains under retail sentiment)
+- Cross-reference only: FINRA margin debt or FRED series BOGZ1FL073164003.Q, including the margin debt / equity market cap ratio from Retail Sentiment as a confirmation check only (primary margin debt scoring remains under retail sentiment; do not double-count it here)
+- **AI infrastructure debt financing / vendor-financing loops [primary: SEARCH]** (best-effort): scan the past 30 days for disclosed debt financing, private credit facilities, ABS / asset-backed facilities, delayed-draw term loans, convertible debt, or sale-leaseback financing tied to AI GPU clusters, neoclouds, or data centers (CoreWeave, Crusoe, Lambda, Nebius, Applied Digital, xAI / OpenAI infrastructure vehicles, Stargate-related entities). Record borrower, amount, date, financing type, collateral / customer-contract backing if disclosed, pricing / rating if disclosed, use of proceeds, and source URL. Separately track Nvidia / hyperscaler circular-financing exposure: disclosed equity investments, customer purchase commitments, capacity backstops, vendor-financing-like arrangements, or guarantees where the recipient is also a buyer of GPUs / compute. Quantify only named disclosed deal amounts; do not invent a circular-financing ratio. If no new disclosure is found in the past 30 days, mark ✗ NOT DISCLOSED for the weekly event signal and optionally cite the latest outstanding disclosed facilities as background, not as 本週新增訊號.
 
 # Output structure
 
@@ -236,7 +237,7 @@ Score based on:
 Score based on:
 
 - CNN Fear & Greed
-- Margin Debt monthly change
+- Margin Debt monthly change and margin debt / equity market cap ratio
 - AAII retail survey
 - Social sentiment proxies: Reddit r/wallstreetbets top weekly posts, X (Twitter) cashtag chatter on meme tickers
 - Note: institutional sentiment reported separately below, not scored here
@@ -262,20 +263,22 @@ Score based on:
 - 0DTE option share of SPX option volume (rolling 5-day)
 - Options total volume / cash equity volume ratio
 - VIX term structure, SKEW, and stock-bond correlation as confirmation signals for crowded optionality / cross-asset complacency
-- Cross-reference FINRA margin debt, while keeping primary margin debt scoring under 散戶情緒
+- Cross-reference margin debt / equity market cap ratio from 散戶情緒 as confirmation only; do not double-count it in 結構性槓桿 scoring
+- AI infrastructure debt financing / vendor-financing loops: disclosed AI data-center / GPU-backed debt facilities, private credit / ABS issuance, and Nvidia / hyperscaler customer-financing ties. Treat this as structural leverage inside the AI capex trade, not as general macro credit conditions; do not create a seventh dimension or change the 15% weight.
 
 **Rubric anchor points:**
 
-- 0-20: Leveraged ETF AUM near 12-month lows; 0DTE share < 30%; no global approvals
-- 21-40: AUM rising moderately; 0DTE share 30-45%; isolated single-market approvals
-- 41-60: AUM growing steadily; 0DTE share 45-55%; 1 market approval in the past 4 weeks
-- 61-80: AUM accelerating; 0DTE share 55-65%; 2+ market approvals in the past 4 weeks
-- 81-100: AUM rising vertically; 0DTE share persistently > 65%; 「全球槓桿擴散訊號」triggered this week
+- 0-20: Leveraged ETF AUM near 12-month lows; 0DTE share < 30%; no global approvals; no recent AI infrastructure debt disclosure
+- 21-40: AUM rising moderately; 0DTE share 30-45%; isolated single-market approvals; AI debt disclosures are small / refinancing-only
+- 41-60: AUM growing steadily; 0DTE share 45-55%; 1 market approval in the past 4 weeks; AI infrastructure debt is present but matched to disclosed customer contracts with stable terms
+- 61-80: AUM accelerating; 0DTE share 55-65%; 2+ market approvals in the past 4 weeks; new large AI infrastructure debt / private credit / ABS facilities or visible Nvidia / hyperscaler customer-financing loops expand this month
+- 81-100: AUM rising vertically; 0DTE share persistently > 65%; 「全球槓桿擴散訊號」triggered this week; or AI infrastructure financing shows multiple large, collateral-light, circular, or covenant-stretched deals in the same month
 
 **Special rule:**
 
 - If 2+ non-US markets approve single-stock leveraged / inverse ETFs in the same week, set this dimension's score floor to 81 and flag 「全球槓桿擴散訊號」.
 - When triggered, 本週新增訊號 must list approving markets, underlying stocks, leverage multiple, and expected AUM / size if available.
+- AI infrastructure debt financing is a best-effort structural-leverage signal. If no current disclosure is found, mark ✗ NOT DISCLOSED and do not penalize the source coverage score. If disclosed deal amounts are available, include them in 數據附錄 with issuer, amount, date, financing type, and source; use stale disclosures only as background unless they occurred inside the required weekly / monthly window.
 
 ## 綜合分數
 
