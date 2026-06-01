@@ -62,7 +62,7 @@ For `✓ SEARCH-VERIFIED`, record in 數據附錄: search query, result title, r
 
 **Source-preferred method:** Data-source bullets may include a `[primary: ...]` tag. Known-403 / WAF-protected sources tagged `[primary: SEARCH]` should use WebSearch first, without spending a mandatory WebFetch round. FRED sources tagged `[primary: API]` should use a keyless endpoint such as `https://fred.stlouisfed.org/graph/fredgraph.csv?id=<SERIES>`. Untagged sources default to `[primary: DIRECT]` with `✓ SEARCH-VERIFIED` as an allowed secondary path.
 
-Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition, AI infrastructure debt financing / vendor-financing loops) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure.
+Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, AI compute supply/demand and overcapacity risk, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition, AI infrastructure debt financing / vendor-financing loops) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure.
 
 **Timeout policy:** If any single direct fetch exceeds ~90 seconds, try the source's API or WebSearch path if available. If no path returns a current usable value, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
 
@@ -108,6 +108,7 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 - AI token volume growth rate: search for reported metrics from Anthropic, OpenAI, Google quarterly disclosures (best-effort; cite if disclosed this quarter, else skip)
 - OpenAI / Anthropic annualized revenue: most recent public disclosure or press leak (The Information, Reuters, CNBC) (best-effort; if no current-quarter disclosure or credible press leak, mark ✗ NOT DISCLOSED)
 - Hyperscaler AI customer concentration: any disclosure on % of backlog from top AI customers (best-effort; usually qualitative from earnings calls)
+- **AI compute supply/demand and overcapacity risk [primary: SEARCH]** (best-effort): scan for evidence that AI compute capacity growth is diverging from actual utilization / demand. Track GPU cloud pricing and utilization signals from public GPU rental / cloud providers (Vast.ai, RunPod, Lambda, CoreWeave if disclosed), HBM / DRAM spot or contract-price commentary from TrendForce / DRAMeXchange, accelerator lead-time changes, order digestion, inventory, or capacity-utilization commentary from Nvidia, TSMC, SK hynix, Micron, hyperscalers, and neocloud earnings calls. Frame the signal as capacity-vs-demand gap, not simple price direction: falling GPU rental / memory prices are bearish only when paired with weak utilization, order digestion, rising inventory, or capex pullback; rising prices may indicate healthy demand or cost inflation. If no current disclosure or credible pricing / utilization evidence is found, mark ✗ NOT DISCLOSED.
 
 ## Speculative Behavior
 
@@ -210,6 +211,7 @@ Score based on:
 - S&P 500 P/E, Shiller CAPE vs 10-year average (primary)
 - Mag 7 weighted P/E vs historical
 - AI fundamentals reality check: is hyperscaler capex guidance still being raised? Is token growth sustaining? If capex guidance starts being cut, valuation risk rises sharply even if P/E unchanged.
+- AI compute supply/demand reality check: is capacity expansion still being absorbed by utilization, token growth, and paying demand? If GPU rental rates, memory pricing, accelerator lead times, inventory, or earnings-call digestion commentary weaken while capacity is still being added, valuation risk rises even before formal capex guidance is cut. Do not score raw chip / rental price direction alone; score the capacity-vs-demand gap.
 - **TP-upgrade phase signal**: classify each major sell-side TP raise on Mag 7 / TSMC / AI semi bellwethers this period as (a) **EPS-driven** — target PE roughly stable, upgrade explained by earnings revision — or (b) **multiple-driven** — target PE expands while EPS revision is modest, often justified by "long-duration AI demand" / "structural re-rating" / "should trade at premium to historical band". Multiple-driven upgrades happening across 2+ bellwethers in the same quarter is a late-cycle signal (price chases narrative-based PE re-rating, not earnings). Calibration anchor: 2026-Q2 Morgan Stanley TSMC raise argued 20–30× target PE is reasonable while the EPS revision did less lifting than the PE expansion itself. Caveat: a structural re-rating from cyclical-semi to AI-infrastructure-utility can partially justify multiple expansion — do not auto-flag any PE rise as bubble, but do flag when the dominant lever of TP upgrades shifts from E to multiple across multiple names.
 
 ### 2. 市場廣度 (weight 13%)
@@ -265,6 +267,7 @@ Score based on:
 - VIX term structure, SKEW, and stock-bond correlation as confirmation signals for crowded optionality / cross-asset complacency
 - Cross-reference margin debt / equity market cap ratio from 散戶情緒 as confirmation only; do not double-count it in 結構性槓桿 scoring
 - AI infrastructure debt financing / vendor-financing loops: disclosed AI data-center / GPU-backed debt facilities, private credit / ABS issuance, and Nvidia / hyperscaler customer-financing ties. Treat this as structural leverage inside the AI capex trade, not as general macro credit conditions; do not create a seventh dimension or change the 15% weight.
+- Cross-reference AI compute overcapacity signals from 估值溢價 as confirmation only: capacity glut / utilization weakness is the trigger mechanism that can impair GPU collateral values, customer-contract backing, and circular vendor-financing loops. Primary scoring for the supply/demand gap remains under AI fundamentals / valuation; do not double-count it here.
 
 **Rubric anchor points:**
 
@@ -279,6 +282,7 @@ Score based on:
 - If 2+ non-US markets approve single-stock leveraged / inverse ETFs in the same week, set this dimension's score floor to 81 and flag 「全球槓桿擴散訊號」.
 - When triggered, 本週新增訊號 must list approving markets, underlying stocks, leverage multiple, and expected AUM / size if available.
 - AI infrastructure debt financing is a best-effort structural-leverage signal. If no current disclosure is found, mark ✗ NOT DISCLOSED and do not penalize the source coverage score. If disclosed deal amounts are available, include them in 數據附錄 with issuer, amount, date, financing type, and source; use stale disclosures only as background unless they occurred inside the required weekly / monthly window.
+- If AI compute overcapacity evidence is present, use it as a stress trigger / confirmation for AI infrastructure debt analysis, not as a separate structural-leverage score input unless the same sources disclose debt-term deterioration, collateral impairment, refinancing stress, or customer-contract weakness.
 
 ## 綜合分數
 
