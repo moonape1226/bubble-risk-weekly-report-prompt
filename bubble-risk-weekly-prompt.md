@@ -332,7 +332,9 @@ After all sections above, output a fenced JSON block (label `json`) for next wee
 }
 ```
 
-Generate all report sections, including the 視覺化 section below, before invoking the archive write. Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub connector's file-write API**. If the connector supports a multi-file tree commit, write `score.json` and `report.md` in one commit. If the connector only supports create-or-update for one file per API call, two consecutive single-file commits directly to `main` are acceptable and expected. The routine must complete these write(s) autonomously inside the same session — it is the routine's job, not the user's.
+Generate all report sections, including the 視覺化 section below, before invoking the archive write. Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub connector's file-write API**, using whatever write mechanism the connector provides. The routine must complete the write autonomously inside the same session — it is the routine's job, not the user's.
+
+**Required end-state (this is what matters, not the mechanism):** when the run finishes, `report-<week>/score.json` and `report-<week>/report.md` must both exist on the `main` branch of `moonape1226/bubble-risk-archive`, with no pull request left open and no review pending. If the connector reaches `main` by opening a branch and pull request that it then merges within the same session, that is fine — do not avoid the connector's native flow, but do not leave anything un-merged or waiting for a human.
 
 **Strictly forbidden:**
 
@@ -341,17 +343,18 @@ Generate all report sections, including the 視覺化 section below, before invo
 - Do NOT ask the user to run shell commands or `git push` manually
 - Do NOT print a PAT, token, or personal access credential anywhere in the report
 - Do NOT defer the commit with phrases like "請執行以下指令完成推送"
+- Do NOT leave a pull request open or waiting for human review — if the connector's flow uses a PR, it must be merged to `main` in the same session
 - Do NOT use any write method other than the GitHub connector's file-write operation(s). This includes gh CLI, GitPython / libgit2 / pygit2, subprocess wrappers around git, and direct curl / HTTP calls to the GitHub REST or Contents API.
 
 **Required behavior:**
 
 1. Check if folder `report-<week>/` already exists for the current ISO week (use the connector's read/list API — listing the folder or checking for `report-<week>/score.json` both work).
 2. **If it exists**: this is a same-week re-run (likely RUN NOW for testing). Default behavior is to **skip the commit step** to avoid commit log churn. Add a line to the report: `> Same-week folder already exists in archive; commit skipped. Add 「FORCE COMMIT」 to the invocation context to overwrite.`
-3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: use the connector's file-write operation(s) to write both files under one folder per week, committing **directly to the `main` branch**. Prefer one multi-file commit if supported; otherwise make two consecutive single-file commits as one archive-write step. Do not re-run the same-week skip check between the two file writes. Do not open a pull request, do not create a feature branch, do not request review — this is an automated weekly archive, not a code change. Write:
+3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: use the connector's file-write operation(s) to write both files under one folder per week so they land on `main` (see Required end-state above). Prefer one multi-file commit if supported; otherwise write the two files as one archive-write step. Do not re-run the same-week skip check between the two file writes. Write:
    - `report-<week>/score.json` — the JSON block above
    - `report-<week>/report.md` — the full markdown report
-   - Commit message: `weekly archive <week>` (or `weekly archive <week> [forced overwrite]` when overwriting)
-   - Branch: `main` (direct commit, no PR)
+   - Commit / PR title: `weekly archive <week>` (or `weekly archive <week> [forced overwrite]` when overwriting)
+   - Target branch: `main` (if the connector opens a PR to get there, merge it in-session; leave nothing open)
 4. If the connector call fails (auth, rate limit, network), state the actual error at the end of the report; do not silently skip and do not fall back to local git, gh CLI, or any other write method.
 5. If no GitHub connector file-read / file-write tool is available in the runtime at all, state: `GitHub connector unavailable in this environment; enable the GitHub connector in routine settings and rerun.` Then leave the report and JSON inline, with no fallback commit attempt.
 
