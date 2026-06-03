@@ -97,6 +97,8 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 - High Yield OAS: FRED series BAMLH0A0HYM2 [primary: API, fredgraph.csv?id=BAMLH0A0HYM2]
 - Investment Grade OAS: FRED series BAMLC0A0CM [primary: API, fredgraph.csv?id=BAMLC0A0CM]
 - 10Y Treasury yield: FRED series DGS10 [primary: API, fredgraph.csv?id=DGS10]
+- 10Y Treasury real yield / TIPS: FRED series DFII10 [primary: API, fredgraph.csv?id=DFII10]
+- 10Y breakeven inflation rate: FRED series T10YIE [primary: API, fredgraph.csv?id=T10YIE]
 - WTI crude oil price: FRED series DCOILWTICO [primary: API, fredgraph.csv?id=DCOILWTICO]
 - Fed balance sheet: FRED series WALCL [primary: API, fredgraph.csv?id=WALCL]
 - Global central bank liquidity cross-check: ECB balance sheet, BOJ balance sheet, and PBoC aggregate financing / liquidity operations (PBoC is best-effort; if no current PBoC/NBS English summary found, mark ✗ NOT DISCLOSED)
@@ -251,9 +253,10 @@ Score based on:
 - Fed funds rate path and forward guidance
 - HY OAS level and weekly change
 - IG OAS
+- 10Y nominal yield change decomposition: compare weekly / multi-week changes in DGS10 vs DFII10 real yield and T10YIE breakeven inflation (`ΔDGS10 ≈ ΔDFII10 + ΔT10YIE`). When 10Y rises, identify whether the move is primarily **real-rate-driven**, **breakeven-driven**, or mixed. Any sustained nominal 10Y rise increases valuation-discount pressure and refinancing cost; the decomposition's added value is the Fed reaction-function read: anchored breakevens imply the Fed put is more available in a downturn, while breakeven-driven rises imply inflation expectations are constraining Fed easing and moving the trigger closer. Treat this as a transmission / trigger diagnostic, not as a new dimension.
 - Fed balance sheet movement
 - Global liquidity cross-check: ECB / BOJ balance sheets and PBoC aggregate financing or liquidity operations. Use as confirmation, not a separate seventh dimension.
-- **三角交叉訊號**: Compare current state of {S&P 500, WTI oil, 10Y yield}. Flag if all three are at multi-month highs simultaneously, which is historically unstable.
+- **三角交叉訊號**: Compare current state of {S&P 500, WTI oil, 10Y yield}. Flag if all three are at multi-month highs simultaneously, which is historically unstable. In the interpretation, decompose the 10Y change: WTI rising with a breakeven-driven 10Y rise supports the oil → inflation expectations → Fed-constrained → refinancing-cost transmission; real-rate-driven 10Y rises still pressure valuation and refinancing, but imply a different policy-response path unless credit spreads or refinancing stress are also widening. Do not hardcode a single oil-price scenario as the trigger line; score the transmission mechanism itself.
 
 ### 6. 結構性槓桿 (weight 15%)
 
@@ -266,7 +269,7 @@ Score based on:
 - Options total volume / cash equity volume ratio
 - VIX term structure, SKEW, and stock-bond correlation as confirmation signals for crowded optionality / cross-asset complacency
 - Cross-reference margin debt / equity market cap ratio from 散戶情緒 as confirmation only; do not double-count it in 結構性槓桿 scoring
-- AI infrastructure debt financing / vendor-financing loops: disclosed AI data-center / GPU-backed debt facilities, private credit / ABS issuance, and Nvidia / hyperscaler customer-financing ties. Treat this as structural leverage inside the AI capex trade, not as general macro credit conditions; do not create a seventh dimension or change the 15% weight.
+- AI infrastructure debt financing / vendor-financing loops: disclosed AI data-center / GPU-backed debt facilities, private credit / ABS issuance, and Nvidia / hyperscaler customer-financing ties. Treat this as structural leverage inside the AI capex trade, not as general macro credit conditions; do not create a seventh dimension or change the 15% weight. Reuse the 10Y real-vs-breakeven decomposition from 貨幣與信貸 and already-disclosed facilities only as a refinancing-sensitivity cross-reference; do not add a new weekly fetch requirement here. Add structural-leverage risk only when sources show debt-term deterioration, refinancing stress, collateral impairment, or customer-contract weakness; otherwise keep it as background and do not double-count.
 - Cross-reference AI compute overcapacity signals from 估值溢價 as confirmation only: capacity glut / utilization weakness is the trigger mechanism that can impair GPU collateral values, customer-contract backing, and circular vendor-financing loops. Primary scoring for the supply/demand gap remains under AI fundamentals / valuation; do not double-count it here.
 
 **Rubric anchor points:**
@@ -428,9 +431,11 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 
 表格下方以一段普通文字（非表格、非 code fence）呈現解讀：
 
-> 三者狀態：{穩定共存 / 同向偏高（不穩定）/ 出現分歧（[哪項在重新定價]）}
+> 三者狀態：{穩定共存 / 同向偏高（不穩定）/ 出現分歧（[哪項在重新定價]）}；10Y 成因：{real-rate-driven / breakeven-driven / mixed}，用 `ΔDGS10 ≈ ΔDFII10 + ΔT10YIE` 說明 DFII10 與 T10YIE 的週變動如何改變「油 → 通膨預期 → Fed put / Fed constraint → refinancing」扳機風險。
 
 必要時加 ⚠ 觸發線說明。
+
+Use §3 as a cross-dimensional interpretation only: valuation + leverage = crash potential energy; financing tightening = timing trigger; alignment of all three is the high-risk configuration. Do not reweight the six dimensions, change their independent scores, or double-count inputs for this guide.
 
 # Constraints
 
