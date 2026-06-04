@@ -65,15 +65,17 @@ Before generating this report, use the GitHub connector to fetch the most recent
 - `✗ NOT DISCLOSED` — best-effort item has no current disclosure; this status is forbidden for required sources.
 - `⛔ FETCH FAILED` — no usable current value was obtained from direct fetch, API, or WebSearch.
 
+In `## 數據附錄`, emit a compact **Coverage table** with one row for every bullet under `# Data sources`, in the same section order. Required columns: `維度 / source bullet | 預定來源與方法 | 狀態`. Every `# Data sources` bullet must appear exactly once in this table, including failed or not-disclosed items. If any bullet has no row or no final status, the report is incomplete: fetch it, or mark it `⛔ FETCH FAILED` / `✗ NOT DISCLOSED` according to required-vs-best-effort rules before final output. This table is the source-coverage gate; it does not replace the raw-data rows, but raw-data details may be referenced from the status cell to avoid duplication.
+
 For `✓ SEARCH-VERIFIED`, record in 數據附錄: search query, result title, result URL, publisher/source, publication or data date if visible, retrieval timestamp, and the originally intended source. A row missing query, URL, publisher/source, publication/data date or explicit "date not visible", and retrieval timestamp is incomplete; either fill the missing traceability fields before final output or downgrade the item to `⛔ FETCH FAILED` / `✗ NOT DISCLOSED` according to required-vs-best-effort status. If WebFetch returned 403 but WebSearch found a current usable value, do not label the item ⛔; mention the direct-fetch 403 only in the appendix note.
 
 **Source-preferred method:** Data-source bullets may include a `[primary: ...]` tag. Known-403 / WAF-protected sources tagged `[primary: SEARCH]` should use WebSearch first, without spending a mandatory WebFetch round. Untagged sources default to `[primary: DIRECT]` with `✓ SEARCH-VERIFIED` as an allowed secondary path.
 
-**FRED retrieval order (`[primary: API]` sources):** The `fred.stlouisfed.org` website path (`fredgraph.csv`) is frequently WAF-blocked from automated runs (HTTP 403/504). Prefer in this order:
+**FRED retrieval order (`[primary: API]` sources):** The `fred.stlouisfed.org` website path (`fredgraph.csv`) is frequently WAF-blocked from automated runs (HTTP 403/504). In the routine environment, Bash / curl requests to `fred.stlouisfed.org` and `api.stlouisfed.org` may also be blocked by the sandbox egress allowlist. Use WebFetch / server-side fetch for FRED data retrieval; do not use Bash, curl, or local HTTP clients against FRED hosts. Prefer in this order:
 
-1. **Official FRED API** at `api.stlouisfed.org/fred/series/observations?series_id=<SERIES>&file_type=json&sort_order=desc&limit=<N>&api_key=<FRED_API_KEY>`, where `FRED_API_KEY` is supplied via the routine environment variable or the invocation context. This is a different host from the blocked website and is the most reliable path. Use it whenever a key is available to you.
-2. **`fredgraph.csv?id=<SERIES>`** keyless CSV, if no key is available or the API is unreachable.
-3. **WebSearch** for the current value.
+1. **Official FRED API via WebFetch** at `api.stlouisfed.org/fred/series/observations?series_id=<SERIES>&file_type=json&sort_order=desc&limit=<N>&api_key=<FRED_API_KEY>`, where `FRED_API_KEY` is supplied via the routine environment variable or the invocation context. WebFetch is required here because it is server-side and not subject to the routine sandbox's local egress host allowlist. Use this whenever a key is available to you.
+2. **WebSearch** for the current value only after the WebFetch FRED API path is unavailable or fails, or no key is reachable.
+3. **`fredgraph.csv?id=<SERIES>` via WebFetch** keyless CSV only as an optional last direct-source check when WebSearch cannot produce a usable current value. This path may hit Cloudflare / WAF and is less reliable than the API.
 4. For T10YIE only, **derived** fallback (see FRED history rule).
 
 **Key handling (security — required):** Never print `FRED_API_KEY`, or any URL containing `api_key=`, anywhere in the report or 數據附錄 — the report is committed to a shared archive. Cite FRED-API rows as `FRED API (series_id=<SERIES>)` with the key redacted. If no `FRED_API_KEY` is reachable, do not fabricate one; just fall back down the order above.
@@ -169,6 +171,10 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 
 For every mandatory item above: if current evidence is unavailable or a source fails, keep the heading / item in place and use the section-appropriate placeholder (`本次無...資料`, `基準日`, `FETCH FAILED`, or `—`). Skipping a mandatory heading is forbidden under any condition.
 
+**Section name lock:** Only `## §1 六維度風險條圖`, `## §2 歷史錨點相似度`, and `## §3 三角訊號` may use `§N` numbering. Sections 5-11 must use the bare heading text shown above (`## 六維度評分`, `## 綜合分數`, ..., `## 本次分數存檔`) with no `§4` / `§5` / later prefix. The disclaimer is item 12 but is not a heading or section; it must be the file's final plain-text line exactly as written.
+
+**Exact wording lock:** Use `本次` exactly in the mandatory headings and comparison labels shown in this prompt. Do not substitute `本期`, `本輪`, or other synonyms in section names, table columns, meta labels, `## 本次新增訊號`, or `## 本次分數存檔`.
+
 **Report skeleton lock — before drafting, instantiate this skeleton and fill it in. Keep every heading below exactly as written, in this order. Do not print extra top-level or second-level sections, and do not merge adjacent sections:**
 
 ````markdown
@@ -208,12 +214,15 @@ For every mandatory item above: if current evidence is unavailable or a source f
 **Internal self-check before final output (do not print this checklist):**
 
 - The report contains exactly the 12 mandatory items above, with no renamed, missing, duplicated, or merged sections.
+- Only §1 / §2 / §3 headings contain `§N`; no later section is renumbered as `§4`-`§11`.
+- All required `本次` wording remains exact; no mandatory heading, comparison label, table column, or archive section uses `本期` or another synonym.
 - §1 / §2 / §3 use only their required columns; rationale and sources are outside the visualization tables.
 - `## 六維度評分` and `## 綜合分數` remain independent sections after §3.
 - `## 機構情緒對照` is always emitted, even when it only says `本次無新機構調查數據。`
-- The final visible line is exactly `本報告為相對風險溫度計，非擇時訊號。`
+- The final visible line is exactly `本報告為相對風險溫度計，非擇時訊號。`, and it is plain text, not a `##` / `###` heading.
 - §3 的五段解讀對股市 / WTI / 10Y 的方向描述與 §3 表格「vs 前次」欄符號（▲ / ▼ / 持平）一致；衝突時已改為以表格數據為準。
 - §3「10Y 成因拆解」三項皆為週變動（Δ，bps）；ΔT10YIE 優先取自 FRED `T10YIE` 序列歷史，僅在抓取失敗時以 `DGS10 − DFII10` 推算並標 `derived`，且未把任何水位（如 breakeven 水位）當成 Δ 填入。
+- Before final output, count every bullet under `# Data sources`. The `## 數據附錄` Coverage table row count must equal that bullet count exactly, and each row must carry exactly one status from `✓ API` / `✓ DIRECT` / `✓ SEARCH-VERIFIED` / `✗ NOT DISCLOSED` / `⛔ FETCH FAILED`. If row-count ≠ bullet-count, any bullet is duplicated or missing, any row lacks a final status, or any required bullet carries `✗ NOT DISCLOSED`, the report is incomplete; do not output until the count and statuses are fixed.
 - 每個 `✓ SEARCH-VERIFIED` 列在 數據附錄 都含 search query + result URL + 發布／資料日期（或明示「日期不可見」）+ 抓取 timestamp；任何缺欄的列已補齊欄位、或在最終輸出前依 required-vs-best-effort 改標 `⛔ FETCH FAILED` / `✗ NOT DISCLOSED`，不得帶著不完整 traceability 進入最終輸出。
 - 任何 required 源（FRED API、multpl 等）三管道（API / 直抓 / WebSearch）全敗時標 `⛔ FETCH FAILED`，不得以 `✗ NOT DISCLOSED` 掩蓋；`✗ NOT DISCLOSED` 僅限 Fetch protocol best-effort 清單項目。
 
@@ -221,7 +230,7 @@ For every mandatory item above: if current evidence is unavailable or a source f
 
 - §1 must use exactly these columns: `維度 | 條圖 | 本次 | 前次 | Δ`. No extra columns (no `核心論述`, no `來源`, no `權重` inline). Rationale and sources belong in `## 六維度評分`, not §1.
 - §2 must use exactly: `錨點 | 相似度 | 條圖 | 標記`. No extra columns (no `核心類比特徵`).
-- §3 must use exactly: `指標 | 本次數值 | vs 前次`.
+- §3 must use exactly: `指標 | 本次數值 | vs 前次`. Do not replace it with any other column set (for example `資產 | 方向 | 當前水準 | 訊號意涵` is forbidden).
 - Do not fold `## 六維度評分` or `## 綜合分數` into the §1 table. They are separate sections by design — §1 is a glance-able heatmap, the rationale tables are the audit trail.
 
 ## 六維度評分
@@ -278,6 +287,7 @@ Score based on:
 - 10Y nominal yield change decomposition: decompose the **weekly change** of the 10Y, where each term is a Δ in basis points computed per the FRED history rule — `ΔSERIES = current-execution-date observation − prior-run-date observation`, each taken from its own FRED series history (`DGS10`, `DFII10`, `T10YIE`) — then verify `ΔDGS10 ≈ ΔDFII10 + ΔT10YIE`. Prefer fetching T10YIE directly; only if it cannot be fetched, derive it as `DGS10 − DFII10` and mark it `derived` (per the FRED history rule). Never substitute a **level** (e.g. the breakeven level 2.37%) for a Δ. When 10Y rises, identify whether the move is primarily **real-rate-driven**, **breakeven-driven**, or mixed. Any sustained nominal 10Y rise increases valuation-discount pressure and refinancing cost; the decomposition's added value is the Fed reaction-function read: anchored breakevens imply the Fed put is more available in a downturn, while breakeven-driven rises imply inflation expectations are constraining Fed easing and moving the trigger closer. Treat this as a transmission / trigger diagnostic, not as a new dimension.
 - Fed balance sheet movement
 - Global liquidity cross-check: ECB / BOJ balance sheets and PBoC aggregate financing or liquidity operations. Use as confirmation, not a separate seventh dimension.
+- IG OAS, WALCL / Fed balance sheet, and ECB / BOJ / PBoC liquidity must each appear in the dimension-5 rationale with a current value, or appear in the Coverage table as `⛔ FETCH FAILED` / `✗ NOT DISCLOSED` under the rules above. If any required monetary input is unavailable, the dimension-5 score rationale must explicitly note the missing input instead of scoring as if it were observed.
 - **三角交叉訊號**: Compare current state of {S&P 500, WTI oil, 10Y yield}. Flag if all three are at multi-month highs simultaneously, which is historically unstable. In the interpretation, decompose the 10Y change: WTI rising with a breakeven-driven 10Y rise supports the oil → inflation expectations → Fed-constrained → refinancing-cost transmission; real-rate-driven 10Y rises still pressure valuation and refinancing, but imply a different policy-response path unless credit spreads or refinancing stress are also widening. Do not hardcode a single oil-price scenario as the trigger line; score the transmission mechanism itself.
 
 ### 6. 結構性槓桿 (weight 15%)
@@ -381,6 +391,8 @@ Generate all report sections, including the 視覺化 section below, before invo
 - Do NOT defer the commit with phrases like "請執行以下指令完成推送"
 - Do NOT leave a pull request open or waiting for human review — if the connector's flow uses a PR, it must be merged to `main` in the same session
 - Do NOT use any write method other than the GitHub connector's file-write operation(s). This includes gh CLI, GitPython / libgit2 / pygit2, subprocess wrappers around git, and direct curl / HTTP calls to the GitHub REST or Contents API.
+
+This write-method restriction applies only to archive writes / GitHub API mutation. It does not forbid WebFetch / WebSearch for market-data retrieval; in particular, FRED `[primary: API]` data retrieval must follow the WebFetch-based FRED retrieval order above and must not use Bash / curl to FRED hosts.
 
 **Required behavior:**
 
