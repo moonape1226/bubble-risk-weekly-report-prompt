@@ -62,14 +62,16 @@ Before generating this report, use the GitHub connector to fetch the most recent
 - `✓ API` — obtained from an official machine-readable endpoint such as FRED API / JSON / CSV.
 - `✓ DIRECT` — obtained from the named source by WebFetch or equivalent direct page access.
 - `✓ SEARCH-VERIFIED` — obtained through WebSearch because the named source is search-oriented, dynamically rendered, or blocked by WebFetch. This is a successful retrieval, not a fetch failure, but the appendix must show traceability.
-- `✗ NOT DISCLOSED` — best-effort item has no current disclosure.
+- `✗ NOT DISCLOSED` — best-effort item has no current disclosure; this status is forbidden for required sources.
 - `⛔ FETCH FAILED` — no usable current value was obtained from direct fetch, API, or WebSearch.
 
-For `✓ SEARCH-VERIFIED`, record in 數據附錄: search query, result title, result URL, publisher/source, publication or data date if visible, retrieval timestamp, and the originally intended source. If WebFetch returned 403 but WebSearch found a current usable value, do not label the item ⛔; mention the direct-fetch 403 only in the appendix note.
+For `✓ SEARCH-VERIFIED`, record in 數據附錄: search query, result title, result URL, publisher/source, publication or data date if visible, retrieval timestamp, and the originally intended source. A row missing query, URL, publisher/source, publication/data date or explicit "date not visible", and retrieval timestamp is incomplete; either fill the missing traceability fields before final output or downgrade the item to `⛔ FETCH FAILED` / `✗ NOT DISCLOSED` according to required-vs-best-effort status. If WebFetch returned 403 but WebSearch found a current usable value, do not label the item ⛔; mention the direct-fetch 403 only in the appendix note.
 
 **Source-preferred method:** Data-source bullets may include a `[primary: ...]` tag. Known-403 / WAF-protected sources tagged `[primary: SEARCH]` should use WebSearch first, without spending a mandatory WebFetch round. FRED sources tagged `[primary: API]` should use a keyless endpoint such as `https://fred.stlouisfed.org/graph/fredgraph.csv?id=<SERIES>`. Untagged sources default to `[primary: DIRECT]` with `✓ SEARCH-VERIFIED` as an allowed secondary path.
 
-Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, AI compute supply/demand and overcapacity risk, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition, AI infrastructure debt financing / vendor-financing loops) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure.
+**FRED history rule for deltas:** For any FRED delta, fetch the full `fredgraph.csv?id=<SERIES>` history and compute `ΔSERIES = current observation - prior-run observation`, where current observation is the latest valid observation on or before the current execution date and prior-run observation is the latest valid observation on or before the prior-run execution date named in the report meta line. Do not depend on `score.json` for raw FRED values; `score.json` remains the score-only prior-run reference. For the 10Y decomposition, compute `ΔDGS10`, `ΔDFII10`, and `ΔT10YIE` from each series' own FRED history. T10YIE is an independent FRED series and must be fetched directly; do not infer it from `DGS10 - DFII10`. If a derived value is ever used as a fallback, label it `derived` and never label it `✓ SEARCH-VERIFIED`.
+
+Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, AI compute supply/demand and overcapacity risk, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition, AI infrastructure debt financing / vendor-financing loops) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure. All other items are required; if API, direct fetch, and WebSearch paths all fail to obtain a current usable value, mark `⛔ FETCH FAILED` (for example, required FRED series BAMLC0A0CM / IG OAS must not be marked ✗ NOT DISCLOSED after a 403 or API failure).
 
 **Timeout policy:** If any single direct fetch exceeds ~90 seconds, try the source's API or WebSearch path if available. If no path returns a current usable value, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
 
@@ -201,6 +203,10 @@ For every mandatory item above: if current evidence is unavailable or a source f
 - `## 六維度評分` and `## 綜合分數` remain independent sections after §3.
 - `## 機構情緒對照` is always emitted, even when it only says `本次無新機構調查數據。`
 - The final visible line is exactly `本報告為相對風險溫度計，非擇時訊號。`
+- §3 的五段解讀對股市 / WTI / 10Y 的方向描述與 §3 表格「vs 前次」欄符號（▲ / ▼ / 持平）一致；衝突時已改為以表格數據為準。
+- §3「10Y 成因拆解」三項皆為週變動（Δ，bps），ΔT10YIE 取自 FRED `T10YIE` 序列歷史、非 `DGS10 − DFII10` 推算，且未把任何水位（如 breakeven 水位）當成 Δ 填入。
+- 每個 `✓ SEARCH-VERIFIED` 列在 數據附錄 都含 search query + result URL + 發布／資料日期（或明示「日期不可見」）+ 抓取 timestamp；任何缺欄的列已補齊欄位、或在最終輸出前依 required-vs-best-effort 改標 `⛔ FETCH FAILED` / `✗ NOT DISCLOSED`，不得帶著不完整 traceability 進入最終輸出。
+- 任何 required 源（FRED API、multpl 等）三管道（API / 直抓 / WebSearch）全敗時標 `⛔ FETCH FAILED`，不得以 `✗ NOT DISCLOSED` 掩蓋；`✗ NOT DISCLOSED` 僅限 Fetch protocol best-effort 清單項目。
 
 **Hard rules for the visualization tables (§1 / §2 / §3):**
 
@@ -220,7 +226,7 @@ Score based on:
 - S&P 500 P/E, Shiller CAPE vs 10-year average (primary)
 - Mag 7 weighted P/E vs historical
 - AI fundamentals reality check: is hyperscaler capex guidance still being raised? Is token growth sustaining? If capex guidance starts being cut, valuation risk rises sharply even if P/E unchanged.
-- AI compute supply/demand reality check: is capacity expansion still being absorbed by utilization, token growth, and paying demand? If GPU rental rates, memory pricing, accelerator lead times, inventory, or earnings-call digestion commentary weaken while capacity is still being added, valuation risk rises even before formal capex guidance is cut. Do not score raw chip / rental price direction alone; score the capacity-vs-demand gap.
+- AI compute supply/demand reality check: is capacity expansion still being absorbed by utilization, token growth, and paying demand? If GPU rental rates, memory pricing, accelerator lead times, inventory, or earnings-call digestion commentary weaken while capacity is still being added, valuation risk rises even before formal capex guidance is cut. Do not score raw chip / rental price direction alone; score the capacity-vs-demand gap. When no direct utilization / pricing evidence (GPU rental rates, HBM / DRAM pricing, accelerator lead times, order-digestion or capacity-utilization commentary) is obtained this run, do not assert that demand is absorbing capacity; downgrade the conclusion to 「capex / Nvidia 營收仍支撐，但未取得直接利用率證據」 and mark the supporting utilization / pricing items ✗ NOT DISCLOSED.
 - **TP-upgrade phase signal**: classify each major sell-side TP raise on Mag 7 / TSMC / AI semi bellwethers this period as (a) **EPS-driven** — target PE roughly stable, upgrade explained by earnings revision — or (b) **multiple-driven** — target PE expands while EPS revision is modest, often justified by "long-duration AI demand" / "structural re-rating" / "should trade at premium to historical band". Multiple-driven upgrades happening across 2+ bellwethers in the same quarter is a late-cycle signal (price chases narrative-based PE re-rating, not earnings). Calibration anchor: 2026-Q2 Morgan Stanley TSMC raise argued 20–30× target PE is reasonable while the EPS revision did less lifting than the PE expansion itself. Caveat: a structural re-rating from cyclical-semi to AI-infrastructure-utility can partially justify multiple expansion — do not auto-flag any PE rise as bubble, but do flag when the dominant lever of TP upgrades shifts from E to multiple across multiple names.
 
 ### 2. 市場廣度 (weight 13%)
@@ -260,7 +266,7 @@ Score based on:
 - Fed funds rate path and forward guidance
 - HY OAS level and weekly change
 - IG OAS
-- 10Y nominal yield change decomposition: compare weekly / multi-week changes in DGS10 vs DFII10 real yield and T10YIE breakeven inflation (`ΔDGS10 ≈ ΔDFII10 + ΔT10YIE`). When 10Y rises, identify whether the move is primarily **real-rate-driven**, **breakeven-driven**, or mixed. Any sustained nominal 10Y rise increases valuation-discount pressure and refinancing cost; the decomposition's added value is the Fed reaction-function read: anchored breakevens imply the Fed put is more available in a downturn, while breakeven-driven rises imply inflation expectations are constraining Fed easing and moving the trigger closer. Treat this as a transmission / trigger diagnostic, not as a new dimension.
+- 10Y nominal yield change decomposition: decompose the **weekly change** of the 10Y, where each term is a Δ in basis points computed per the FRED history rule — `ΔSERIES = current-execution-date observation − prior-run-date observation`, each taken from its own FRED series history (`DGS10`, `DFII10`, `T10YIE`) — then verify `ΔDGS10 ≈ ΔDFII10 + ΔT10YIE`. T10YIE is fetched directly; never derive ΔT10YIE from `DGS10 − DFII10`, and never substitute a **level** (e.g. the breakeven level 2.37%) for a Δ. When 10Y rises, identify whether the move is primarily **real-rate-driven**, **breakeven-driven**, or mixed. Any sustained nominal 10Y rise increases valuation-discount pressure and refinancing cost; the decomposition's added value is the Fed reaction-function read: anchored breakevens imply the Fed put is more available in a downturn, while breakeven-driven rises imply inflation expectations are constraining Fed easing and moving the trigger closer. Treat this as a transmission / trigger diagnostic, not as a new dimension.
 - Fed balance sheet movement
 - Global liquidity cross-check: ECB / BOJ balance sheets and PBoC aggregate financing or liquidity operations. Use as confirmation, not a separate seventh dimension.
 - **三角交叉訊號**: Compare current state of {S&P 500, WTI oil, 10Y yield}. Flag if all three are at multi-month highs simultaneously, which is historically unstable. In the interpretation, decompose the 10Y change: WTI rising with a breakeven-driven 10Y rise supports the oil → inflation expectations → Fed-constrained → refinancing-cost transmission; real-rate-driven 10Y rises still pressure valuation and refinancing, but imply a different policy-response path unless credit spreads or refinancing stress are also widening. Do not hardcode a single oil-price scenario as the trigger line; score the transmission mechanism itself.
@@ -291,6 +297,7 @@ Score based on:
 
 - If 2+ non-US markets approve single-stock leveraged / inverse ETFs in the same week, set this dimension's score floor to 81 and flag 「全球槓桿擴散訊號」.
 - When triggered, 本次新增訊號 must list approving markets, underlying stocks, leverage multiple, and expected AUM / size if available.
+- Any mention of global leveraged-product diffusion anywhere in the report (including 本次新增訊號 and §7-style new-signal summaries) must state this week's trigger state explicitly: if the 「全球槓桿擴散訊號」 did not fire this week, append 「本週擴散訊號未觸發」 so an ongoing background trend is not mis-read as a fresh trigger.
 - AI infrastructure debt financing is a best-effort structural-leverage signal. If no current disclosure is found, mark ✗ NOT DISCLOSED and do not penalize the source coverage score. If disclosed deal amounts are available, include them in 數據附錄 with issuer, amount, date, financing type, and source; use stale disclosures only as background unless they occurred inside the required weekly / monthly window.
 - If AI compute overcapacity evidence is present, use it as a stress trigger / confirmation for AI infrastructure debt analysis, not as a separate structural-leverage score input unless the same sources disclose debt-term deterioration, collateral impairment, refinancing stress, or customer-contract weakness.
 
@@ -333,7 +340,7 @@ Raw data table with sources, FRED series IDs, and timestamps.
 
 ## 本次分數存檔
 
-After all sections above, output a fenced JSON block (label `json`) for the next run to read. Schema must match exactly:
+After all sections above, output a fenced JSON block (label `json`) for the next run to read. This schema intentionally stores only the six dimension scores plus `total` / `tier`; it deliberately does not persist raw series — the `DGS10` / `DFII10` / `T10YIE` values needed for the 10Y change decomposition are re-fetched from FRED history every run (see the FRED history rule), so do not extend this schema to store them. Schema must match exactly:
 
 ```json
 {
@@ -437,7 +444,9 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 | WTI 原油 | $92.1 /bbl | ▲ +5.5%（前次 ~$87.3） |
 | 10Y Treasury | 4.57% | ▲ +12 bps（前次 ~4.45%） |
 
-上方為格式範例，方向符號用 ▲（上）/ ▼（下）。
+上方為格式範例，方向符號用 ▲（上）/ ▼（下）/ 持平。
+
+**方向一致性要求：** 下方五段解讀對每個指標（股市 / WTI 原油 / 10Y）的方向描述，必須與本 §3 表格「vs 前次」欄的方向符號（▲ / ▼ / 持平）一致。若內文與表格數據衝突（例如表格標 10Y 持平、內文卻稱債同步上行），一律以表格數據為準，並修正內文措辭。
 
 表格下方以**分段結構**呈現解讀（用 Markdown 粗體小標 + 條列，非表格、非 code fence、不得使用框線字元）。粗體小標只是標籤，不要用 `##` / `###` 標題，以免與 12-section 結構衝突。依序輸出下列五段：
 
@@ -449,11 +458,11 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 
 **格局轉變**：一句話描述前次格局 → 本次格局的轉變。
 
-**10Y 成因拆解（`ΔDGS10 ≈ ΔDFII10 + ΔT10YIE`）**：
+**10Y 成因拆解（`ΔDGS10 ≈ ΔDFII10 + ΔT10YIE`，拆的是週變動、非水位）**：本段拆的是 10Y 的**週變動**（單位 bps）。三項 Δ 各自取對應 FRED 序列（`DGS10` / `DFII10` / `T10YIE`）的歷史，依 Fetch protocol 的 FRED history rule 計算 `Δ = 本次執行日最近有效觀測 − 前次執行日最近有效觀測`（prior 對齊報告 meta 列的前次基準日）。T10YIE 直接抓取，不得用 `DGS10 − DFII10` 推算；嚴禁把任何**水位**（如 breakeven 水位 2.37%）當成 Δ 填入。
 
-- DFII10 實質殖利率：[數值與走向]
-- T10YIE 損益平衡通膨：[數值與走向]
-- 判定：{real-rate-driven / breakeven-driven / mixed}
+- ΔDFII10 實質殖利率週變動：[±X bps、方向]
+- ΔT10YIE 損益平衡通膨週變動：[±X bps、方向]
+- 判定：{real-rate-driven / breakeven-driven / mixed}（依 ΔDFII10 與 ΔT10YIE 何者主導）
 
 **扳機鏈：油 → 通膨預期 → Fed 受限 → refinancing 成本**：描述此鏈當前是否在啟動、Fed put 可得性如何變化（可引用 FOMC 對能源通膨的立場、鷹派異議票數等）。
 
