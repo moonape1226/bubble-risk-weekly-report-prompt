@@ -71,16 +71,23 @@ For `✓ SEARCH-VERIFIED`, record in 數據附錄: search query, result title, r
 
 **Source-preferred method:** Data-source bullets may include a `[primary: ...]` tag. Known-403 / WAF-protected sources tagged `[primary: SEARCH]` should use WebSearch first, without spending a mandatory WebFetch round. Untagged sources default to `[primary: DIRECT]` with `✓ SEARCH-VERIFIED` as an allowed secondary path.
 
-**FRED retrieval order (`[primary: API]` sources):** The `fred.stlouisfed.org` website path (`fredgraph.csv`) is frequently WAF-blocked from automated runs (HTTP 403/504). In the routine environment, Bash / curl requests to `fred.stlouisfed.org` and `api.stlouisfed.org` may also be blocked by the sandbox egress allowlist. Use WebFetch / server-side fetch for FRED data retrieval; do not use Bash, curl, or local HTTP clients against FRED hosts. Prefer in this order:
+**Macro-data retrieval order (`[primary: API]` sources):** FRED is the canonical source and is tried first, but in the routine environment it has repeatedly been unreachable: `fred.stlouisfed.org` / `api.stlouisfed.org` are blocked both by the sandbox egress allowlist (Bash/curl) and by FRED's WAF via WebFetch (HTTP 403). Use WebFetch / server-side fetch for all macro-data retrieval; do not use Bash, curl, or local HTTP clients against data hosts. When FRED fails, fall through to the alternative official API for that series (these carry daily history too, so the 10Y change decomposition is preserved), then WebSearch, then derived. Per-series order:
 
-1. **Official FRED API via WebFetch** at `api.stlouisfed.org/fred/series/observations?series_id=<SERIES>&file_type=json&sort_order=desc&limit=<N>&api_key=<FRED_API_KEY>`, where `FRED_API_KEY` is supplied via the routine environment variable or the invocation context. WebFetch is required here because it is server-side and not subject to the routine sandbox's local egress host allowlist. Use this whenever a key is available to you.
-2. **WebSearch** for the current value only after the WebFetch FRED API path is unavailable or fails, or no key is reachable.
-3. **`fredgraph.csv?id=<SERIES>` via WebFetch** keyless CSV only as an optional last direct-source check when WebSearch cannot produce a usable current value. This path may hit Cloudflare / WAF and is less reliable than the API.
-4. For T10YIE only, **derived** fallback (see FRED history rule).
+1. **FRED API via WebFetch** — `api.stlouisfed.org/fred/series/observations?series_id=<SERIES>&file_type=json&sort_order=desc&limit=<N>&api_key=<FRED_API_KEY>`, key from the routine env / invocation context. WebFetch is required (server-side, not subject to the sandbox egress allowlist). Try this first whenever a key is available.
+2. **Alternative official API via WebFetch** (only if FRED fails) — different host, may not share FRED's WAF block, and keeps daily history:
+   - Rates `DGS10` / `DFII10`: US Treasury daily yield-curve XML — `home.treasury.gov/resource-center/data-chart-center/interest-rates/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value=<YYYY>` (field `BC_10YEAR`) and `...&data=daily_treasury_real_yield_curve` (field `TC_10YEAR`). No key.
+   - `T10YIE`: when both Treasury legs are obtained, compute `BC_10YEAR − TC_10YEAR` (mark `derived` — same definition as FRED's breakeven; with daily history the Δ decomposition is still valid).
+   - `WALCL` (Fed balance sheet, weekly): Fed DDP CSV — `federalreserve.gov/datadownload/Output.aspx?rel=H41&filetype=csv` (or the H.4.1 release). No key.
+   - `DCOILWTICO` (WTI): EIA API v2 — `api.eia.gov/v2/petroleum/pri/spt/data/?api_key=<EIA_API_KEY>&facets[series][]=RWTC` — only if `EIA_API_KEY` is reachable; else skip to WebSearch.
+   - HY/IG OAS (`BAMLH0A0HYM2` / `BAMLC0A0CM`): no free non-FRED API exists (ICE BofA proprietary) — skip straight to WebSearch.
+3. **WebSearch** — current spot value, if both FRED and the alternative API fail or none applies. Mark the series spot-only / no daily history.
+4. For `T10YIE` only — **derived** `DGS10 − DFII10` as the final fallback (see FRED history rule).
 
-**Key handling (security — required):** Never print `FRED_API_KEY`, or any URL containing `api_key=`, anywhere in the report or 數據附錄 — the report is committed to a shared archive. Cite FRED-API rows as `FRED API (series_id=<SERIES>)` with the key redacted. If no `FRED_API_KEY` is reachable, do not fabricate one; just fall back down the order above.
+Reachability of the alternative hosts (`home.treasury.gov`, `federalreserve.gov`, `api.eia.gov`) from the routine is **best-effort and unconfirmed** — if a host also returns an access error, fall through to the next tier; never fabricate a value.
 
-**FRED history rule for deltas:** For any FRED delta, fetch the full series history (FRED API or `fredgraph.csv?id=<SERIES>`, per the retrieval order above) and compute `ΔSERIES = current observation - prior-run observation`, where current observation is the latest valid observation on or before the current execution date and prior-run observation is the latest valid observation on or before the prior-run execution date named in the report meta line. Do not depend on `score.json` for raw FRED values; `score.json` remains the score-only prior-run reference. For the 10Y decomposition, compute `ΔDGS10`, `ΔDFII10`, and `ΔT10YIE` from each series' own history. Prefer fetching T10YIE as an independent FRED series. Only if T10YIE cannot be fetched (no API key and website/search both fail), derive it as `T10YIE = DGS10 − DFII10` (this is FRED's own definition of the breakeven) — mark such a value `derived`, never `✓ API` or `✓ SEARCH-VERIFIED`, and note in §3 that with a derived breakeven the identity `ΔDGS10 ≈ ΔDFII10 + ΔT10YIE` holds by construction (so it confirms the attribution, not an independent cross-check). Never substitute a level for a Δ.
+**Key handling (security — required):** Never print `FRED_API_KEY`, `EIA_API_KEY`, or any URL containing `api_key=`, anywhere in the report or 數據附錄 — the report is committed to a shared archive. Cite API rows as `FRED API (series_id=<SERIES>)` / `US Treasury (BC_10YEAR)` / `EIA (RWTC)` etc. with keys redacted. If a key is not reachable, do not fabricate one; just fall down the order above.
+
+**History rule for deltas:** For any rate delta, fetch the full series history from whichever tier-1/tier-2 API succeeded (FRED API or, on FRED failure, US Treasury XML) and compute `ΔSERIES = current observation - prior-run observation`, where current observation is the latest valid observation on or before the current execution date and prior-run observation is the latest valid observation on or before the prior-run execution date named in the report meta line. Do not depend on `score.json` for raw series values; `score.json` remains the score-only prior-run reference. For the 10Y decomposition, compute `ΔDGS10`, `ΔDFII10`, and `ΔT10YIE` from daily history. The decomposition is only valid when DGS10 and DFII10 both come from a daily-history API (FRED or Treasury); compute T10YIE as nominal − real (mark `derived` — FRED's own breakeven definition; the identity `ΔDGS10 ≈ ΔDFII10 + ΔT10YIE` then holds by construction, confirming attribution rather than independently cross-checking). **If either leg falls back to WebSearch (spot only, no history), do not fabricate a Δ: report the spot levels and state "本週 Δ 分解不可用——無日序資料".** Never substitute a level for a Δ.
 
 Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, AI compute supply/demand and overcapacity risk, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition, AI infrastructure debt financing / vendor-financing loops) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure. All other items are required; if API, direct fetch, and WebSearch paths all fail to obtain a current usable value, mark `⛔ FETCH FAILED` (for example, required FRED series BAMLC0A0CM / IG OAS must not be marked ✗ NOT DISCLOSED after a 403 or API failure).
 
@@ -113,14 +120,14 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 
 ## Monetary & Credit
 
-- Fed funds rate: FRED series DFEDTARU and DFEDTARL [primary: API, fredgraph.csv?id=DFEDTARU / DFEDTARL]
-- High Yield OAS: FRED series BAMLH0A0HYM2 [primary: API, fredgraph.csv?id=BAMLH0A0HYM2]
-- Investment Grade OAS: FRED series BAMLC0A0CM [primary: API, fredgraph.csv?id=BAMLC0A0CM]
-- 10Y Treasury yield: FRED series DGS10 [primary: API, fredgraph.csv?id=DGS10]
-- 10Y Treasury real yield / TIPS: FRED series DFII10 [primary: API, fredgraph.csv?id=DFII10]
-- 10Y breakeven inflation rate: FRED series T10YIE [primary: API, fredgraph.csv?id=T10YIE]
-- WTI crude oil price: FRED series DCOILWTICO [primary: API, fredgraph.csv?id=DCOILWTICO]
-- Fed balance sheet: FRED series WALCL [primary: API, fredgraph.csv?id=WALCL]
+- Fed funds rate: FRED series DFEDTARU and DFEDTARL [primary: API → WebSearch]
+- High Yield OAS: FRED series BAMLH0A0HYM2 [primary: API → WebSearch] (no non-FRED API; WebSearch spot on FRED failure)
+- Investment Grade OAS: FRED series BAMLC0A0CM [primary: API → WebSearch] (no non-FRED API; WebSearch spot on FRED failure)
+- 10Y Treasury yield: FRED series DGS10 [primary: API → US Treasury XML `BC_10YEAR` → WebSearch]
+- 10Y Treasury real yield / TIPS: FRED series DFII10 [primary: API → US Treasury XML `TC_10YEAR` → WebSearch]
+- 10Y breakeven inflation rate: FRED series T10YIE [primary: API → Treasury nominal − real (`derived`) → WebSearch]
+- WTI crude oil price: FRED series DCOILWTICO [primary: API → EIA API `RWTC` → WebSearch]
+- Fed balance sheet: FRED series WALCL [primary: API → Fed DDP CSV (H.4.1) → WebSearch]
 - Global central bank liquidity cross-check: ECB balance sheet, BOJ balance sheet, and PBoC aggregate financing / liquidity operations (PBoC is best-effort; if no current PBoC/NBS English summary found, mark ✗ NOT DISCLOSED)
 
 ## AI Fundamentals
