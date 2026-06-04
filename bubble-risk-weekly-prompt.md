@@ -375,13 +375,13 @@ Generate all report sections, including the 視覺化 section below, before invo
 
 **Required behavior:**
 
-1. Check if folder `report-<YYYY-MM-DD>/` already exists for the current Asia/Taipei execution date (use the connector's read/list API — listing the folder or checking for `report-<YYYY-MM-DD>/score.json` both work).
-2. **If it exists**: this is a same-day re-run (likely RUN NOW for testing). Default behavior is to **skip the commit step** to avoid commit log churn. Add a line to the report: `> Same-day folder already exists in archive; commit skipped. Add 「FORCE COMMIT」 to the invocation context to overwrite.`
-3. **If it does not exist OR the invocation context contains `FORCE COMMIT`**: use the connector's file-write operation(s) to write both files under one folder per execution date so they land on `main` (see Required end-state above). Prefer one multi-file commit if supported; otherwise write the two files as one archive-write step. Do not re-run the same-day skip check between the two file writes. Write:
+1. Write both files for the current Asia/Taipei execution date so they land on `main` (see Required end-state above). Use the connector's file-write operation(s); prefer one multi-file commit if supported, otherwise write the two files as one archive-write step.
    - `report-<YYYY-MM-DD>/score.json` — the JSON block above
    - `report-<YYYY-MM-DD>/report.md` — the full markdown report
-   - Commit / PR title: `archive <YYYY-MM-DD>` (or `archive <YYYY-MM-DD> [forced overwrite]` when overwriting)
+   - Commit / PR title: `archive <YYYY-MM-DD>`
    - Target branch: `main` (if the connector opens a PR to get there, merge it in-session; leave nothing open)
+2. **If folder `report-<YYYY-MM-DD>/` already exists for today** (same-day re-run, e.g. RUN NOW after a prompt change): **overwrite it in place** with the freshly generated report and scores. Do not skip. The date-keyed scheme overwrites the same two files, so a same-day re-run costs only one extra commit, not folder churn; the latest run for a given date should always be the committed version. (There is no `FORCE COMMIT` flag — overwrite is the default, because the claude.ai RUN NOW trigger cannot pass ad-hoc invocation strings.)
+3. Note: the prior-run reference (see `# Prior run reference`) filters strictly to dates **before** today, so overwriting today's folder never makes the run read its own write for Δ.
 4. If the connector call fails (auth, rate limit, network), state the actual error at the end of the report; do not silently skip and do not fall back to local git, gh CLI, or any other write method.
 5. If no GitHub connector file-read / file-write tool is available in the runtime at all, state: `GitHub connector unavailable in this environment; enable the GitHub connector in routine settings and rerun.` Then leave the report and JSON inline, with no fallback commit attempt.
 
