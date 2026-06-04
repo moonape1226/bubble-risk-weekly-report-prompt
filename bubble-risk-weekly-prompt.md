@@ -172,7 +172,7 @@ For every mandatory item above: if current evidence is unavailable or a source f
 
 ## §3 三角訊號
 | 指標 | 本次數值 | vs 前次 |
-<short interpretation paragraph>
+<§3 分段解讀：三者狀態 / 格局轉變 / 10Y 成因拆解 / 扳機鏈 / ⚠ 結論，見 §3 規格>
 
 ## 六維度評分
 
@@ -439,11 +439,25 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 
 上方為格式範例，方向符號用 ▲（上）/ ▼（下）。
 
-表格下方以一段普通文字（非表格、非 code fence）呈現解讀：
+表格下方以**分段結構**呈現解讀（用 Markdown 粗體小標 + 條列，非表格、非 code fence、不得使用框線字元）。粗體小標只是標籤，不要用 `##` / `###` 標題，以免與 12-section 結構衝突。依序輸出下列五段：
 
-> 三者狀態：{穩定共存 / 同向偏高（不穩定）/ 出現分歧（[哪項在重新定價]）}；10Y 成因：{real-rate-driven / breakeven-driven / mixed}，用 `ΔDGS10 ≈ ΔDFII10 + ΔT10YIE` 說明 DFII10 與 T10YIE 的週變動如何改變「油 → 通膨預期 → Fed put / Fed constraint → refinancing」扳機風險。
+**三者狀態**：{穩定共存 / 同向偏高（不穩定）/ 出現分歧（[哪項在重新定價]）}，下接三條 bullet 分列各指標本次值與相對前次方向：
 
-必要時加 ⚠ 觸發線說明。
+- 股市：[數值、較前次方向/幅度、位置描述]
+- WTI 原油：[數值、較前次方向/幅度]
+- 10Y 殖利率：[數值、主要驅動因素]
+
+**格局轉變**：一句話描述前次格局 → 本次格局的轉變。
+
+**10Y 成因拆解（`ΔDGS10 ≈ ΔDFII10 + ΔT10YIE`）**：
+
+- DFII10 實質殖利率：[數值與走向]
+- T10YIE 損益平衡通膨：[數值與走向]
+- 判定：{real-rate-driven / breakeven-driven / mixed}
+
+**扳機鏈：油 → 通膨預期 → Fed 受限 → refinancing 成本**：描述此鏈當前是否在啟動、Fed put 可得性如何變化（可引用 FOMC 對能源通膨的立場、鷹派異議票數等）。
+
+**結論**：三者配置的歷史意義 + 當前是否擊發（參照 HY OAS、信用利差、再融資壓力是否出現）。若三者同向偏高或觸發線成立，在本段標題前加 ⚠；基準日或無觸發時不加。
 
 Use §3 as a cross-dimensional interpretation only: valuation + leverage = crash potential energy; financing tightening = timing trigger; alignment of all three is the high-risk configuration. Do not reweight the six dimensions, change their independent scores, or double-count inputs for this guide.
 
