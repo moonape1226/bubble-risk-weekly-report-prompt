@@ -1,5 +1,16 @@
 You are producing a twice-weekly market bubble risk report in Traditional Chinese (zh-TW), with financial terminology kept in English (P/E, OAS, Mag 7, Fear & Greed, capex, hyperscaler, token growth, etc.).
 
+**Output terminology lock:** Because archived reports are diffed across runs, keep report-visible terminology stable for recurring concepts. The prompt may still use English instruction labels and Chinese explanatory prose, but generated report labels and `## 本次新增訊號` bullets must use the pinned terms below instead of synonyms. Mandatory section headings and dimension names in `# Output structure` remain locked as written. The `## 數據附錄` Coverage table mirrors the English `# Data sources` bullet wording; that is intentional and is not a synonym violation.
+
+| Concept | Pinned report term | Do not substitute with |
+|---|---|---|
+| Broad private-credit / non-bank liquidity trigger (§5 / §3 / `## 本次新增訊號` narrative) | 私募信貸贖回壓力（private-credit / non-bank fund liquidity stress） | 私募信貸流動性壓力、非銀行基金贖回壓力、private-credit redemption stress |
+| Redemption-request trend | redemption-request ratio | 贖回申請比率、redemption demand ratio |
+| Standard quarterly redemption limit | quarterly redemption cap | 贖回上限、redemption limit、5% gate |
+| Actual cap hit / constrained payout event | gate proration / breach | 閘門、觸及贖回上限、gate hit |
+| Flow direction trigger | net inflow→outflow flip | 資金流出反轉、流入轉流出 |
+| AI infrastructure financing leverage | AI infrastructure debt financing / vendor-financing loops | AI 私募信貸、data-center debt stress、vendor financing |
+
 # Task
 
 Generate a full six-dimension bubble risk assessment for the current execution date.
@@ -8,7 +19,7 @@ Generate a full six-dimension bubble risk assessment for the current execution d
 
 Default is **production** — write to the archive repo at the end of the run.
 
-If the invocation context contains the string `DRY RUN` or `DRY-RUN` (case-insensitive) anywhere, switch to **dry-run mode**:
+If the invocation directive contains the explicit token `MODE: DRY-RUN` (case-insensitive) — or the invocation string is itself exactly `DRY-RUN` / `DRY RUN` as a standalone directive — switch to **dry-run mode**. Do not infer dry-run from the words `dry run` appearing incidentally in conversational prose (e.g. a user saying "let me dry run this"); only the explicit directive token triggers it:
 
 - Still fetch prior run data (read-only, harmless)
 - Generate the full report normally
@@ -82,12 +93,20 @@ python3 scripts/fetch_macro.py <prior-run-date | none>
 - Parse that JSON. Use each series' `latest` / `latest_date` and, for the 10Y rate series, `delta_bps` and the `decomposition` object directly — do not re-fetch these by WebSearch when the script returned `status: ok` / `derived`.
 - For any series with `status: fetch_failed`, fall back to WebSearch for the current spot value (mark `✓ SEARCH-VERIFIED`, spot-only / no daily history). If `decomposition.status == "unavailable_no_daily_history"`, report the spot levels and state `本週 Δ 分解不可用——無日序資料`; never fabricate a Δ.
 - Status mapping for the Coverage table: script `ok` → `✓ API`; `derived` → `derived`; `fetch_failed` then WebSearch success → `✓ SEARCH-VERIFIED`; all paths fail → `⛔ FETCH FAILED`.
+- **Macro-fetch decision branch (single source of truth for script outcomes):** (a) script runs and returns JSON → use each series' values per the bullets above; (b) JSON returns with some series `status: fetch_failed` → WebSearch **only those** series for spot values; (c) the script cannot run as a whole — `python3` unavailable, the script is absent from disk *and* the raw-GitHub fallback fetch also fails, `FRED_API_KEY` missing/invalid so every series errors, or a non-zero exit with no `===MACRO_JSON_START===` / `===MACRO_JSON_END===` block — then WebSearch the current spot value for **all** macro series (mark each `✓ SEARCH-VERIFIED` spot-only, or `⛔ FETCH FAILED` where even WebSearch yields nothing), state `本週 Δ 分解不可用——腳本未能執行` for the 10Y decomposition, and proceed to scoring. The macro fallback is always per-series WebSearch, never abort-the-report and never a blanket re-fetch of series the script already returned `ok` / `derived`.
 
 **Key handling (security — required):** Never print `FRED_API_KEY`, `EIA_API_KEY`, or any URL containing `api_key=`, anywhere in the report or 數據附錄 — the report is committed to a shared archive. The script never prints keys; do not echo the environment or the script's command line with keys expanded. Cite rows as `FRED API (series_id=<SERIES>)` / `US Treasury` / `EIA (RWTC)` with keys redacted.
 
 **History rule for deltas:** Deltas come from the script's daily-history computation (`ΔSERIES = latest observation − observation on/at the prior-run date`), not from `score.json` (which stays score-only). The 10Y decomposition `ΔDGS10 ≈ ΔDFII10 + ΔT10YIE` is taken from the script's `decomposition` object; T10YIE may be FRED-direct or `derived` (`DGS10 − DFII10`) — when derived the identity holds by construction (confirms attribution, not an independent cross-check). Never substitute a **level** (e.g. breakeven level 2.4%) for a Δ; if the script reports no daily history, output spot levels and `本週 Δ 分解不可用`.
 
 Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, AI compute supply/demand and overcapacity risk, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition, AI infrastructure debt financing / vendor-financing loops, private-credit / non-bank fund liquidity stress) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure. All other items are required; if API, direct fetch, and WebSearch paths all fail to obtain a current usable value, mark `⛔ FETCH FAILED` (for example, required FRED series BAMLC0A0CM / IG OAS must not be marked ✗ NOT DISCLOSED after a 403 or API failure).
+
+**Required vs best-effort 一覽**（權威標記在各 `# Data sources` bullet 上；下表僅為導覽，與 bullet 衝突時以 bullet 為準）：
+
+| | 項目 |
+|---|---|
+| **Best-effort**（可 `✗ NOT DISCLOSED`） | analyst TP upgrade decomposition；AI token volume growth；hyperscaler 客戶集中度；OpenAI / Anthropic 營收；AI compute 供需／過剩；PBoC aggregate financing；非美槓桿核准（KRX / TWSE / JPX）；upcoming AI IPO timing；AI infrastructure debt financing / vendor-financing loops；private-credit / 非銀基金贖回壓力 |
+| **Required**（須 `✓ API/DIRECT/SEARCH-VERIFIED` 或 `⛔ FETCH FAILED`，不得 `✗`） | 其餘全部——含 FRED 全序列（DGS10 / DFII10 / T10YIE / BAMLH0A0HYM2 HY OAS / BAMLC0A0CM IG OAS / DFEDTARU·DFEDTARL / WALCL / DCOILWTICO）、S&P 500 P/E・CAPE、Mag 7 P/E、RSP/SPY 廣度、Top-10 集中度、A/D、CNN F&G、Margin Debt、AAII、0DTE / options volume、美國槓桿 ETF AUM、VIX / SKEW、IPO heat、insider Form 4、ECB・BOJ |
 
 **Timeout policy:** If any single direct fetch exceeds ~90 seconds, try the source's API or WebSearch path if available. If no path returns a current usable value, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
 
@@ -412,7 +431,7 @@ This write-method restriction applies only to archive writes / GitHub API mutati
    - Target branch: `main` (if the connector opens a PR to get there, merge it in-session; leave nothing open)
 2. **If folder `report-<YYYY-MM-DD>/` already exists for today** (same-day re-run, e.g. RUN NOW after a prompt change): **overwrite it in place** with the freshly generated report and scores. Do not skip. The date-keyed scheme overwrites the same two files, so a same-day re-run costs only one extra commit, not folder churn; the latest run for a given date should always be the committed version. (There is no `FORCE COMMIT` flag — overwrite is the default, because the claude.ai RUN NOW trigger cannot pass ad-hoc invocation strings.)
 3. Note: the prior-run reference (see `# Prior run reference`) filters strictly to dates **before** today, so overwriting today's folder never makes the run read its own write for Δ.
-4. If the connector call fails (auth, rate limit, network), state the actual error at the end of the report; do not silently skip and do not fall back to local git, gh CLI, or any other write method.
+4. If the connector call fails (auth, rate limit, network, or insufficient permission / scope — e.g. the connector is present but cannot write to the repo or cannot merge to `main`), state the actual error at the end of the report, naming the repo, the target branch, and which operation was denied (write vs merge); do not silently skip and do not fall back to local git, gh CLI, or any other write method.
 5. If no GitHub connector file-read / file-write tool is available in the runtime at all, state: `GitHub connector unavailable in this environment; enable the GitHub connector in routine settings and rerun.` Then leave the report and JSON inline, with no fallback commit attempt.
 
 **Skip this entire commit step if in dry-run mode** (see `# Run mode` at the top). The JSON block above should still be printed inline so the user can inspect it.
