@@ -19,7 +19,7 @@ PRIOR = sys.argv[1] if len(sys.argv) > 1 else "none"
 FRED_SERIES = {
     "DGS10": "pct", "DFII10": "pct", "T10YIE": "pct",
     "BAMLH0A0HYM2": "pct", "BAMLC0A0CM": "pct",
-    "DFEDTARU": "pct", "WALCL": "usd_mn", "DCOILWTICO": "usd",
+    "DFEDTARU": "pct", "DFEDTARL": "pct", "WALCL": "usd_mn", "DCOILWTICO": "usd",
     "ECBASSETSW": "eur_mn", "JPNASSETS": "jpy_100mn",
 }
 
