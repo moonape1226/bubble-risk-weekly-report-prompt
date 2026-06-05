@@ -38,7 +38,7 @@ Before generating this report, use the GitHub connector to fetch the most recent
 1. List all folders matching `report-YYYY-MM-DD/` at the repo root. Ignore legacy week-keyed folders such as `report-YYYY-Www/`; after migration they are not valid prior-run candidates.
 2. **Filter to folders whose date is strictly before the current execution date** — this prevents a same-day RUN NOW re-run from reading its own earlier write.
 3. From the filtered list, sort by folder name descending.
-4. Starting from the latest folder, read `report-<candidate-date>/score.json`. If that file is missing, unreadable, or cannot be parsed as valid JSON matching the schema below, skip that folder and try the next older candidate. Do not treat a partial folder as the prior run.
+4. Starting from the latest folder, read `report-<candidate-date>/score.json`. If that file is missing, unreadable, or cannot be parsed as valid JSON matching the schema below — or if `report-<candidate-date>/report.md` is missing (a folder with `score.json` but no `report.md` is a partial write, not a usable prior run) — skip that folder and try the next older candidate. Do not treat a partial folder as the prior run.
 5. Use the first candidate with a valid `score.json` as the prior-run reference — schema:
    ```json
    {
@@ -99,13 +99,13 @@ python3 scripts/fetch_macro.py <prior-run-date | none>
 
 **History rule for deltas:** Deltas come from the script's daily-history computation (`ΔSERIES = latest observation − observation on/at the prior-run date`), not from `score.json` (which stays score-only). The 10Y decomposition `ΔDGS10 ≈ ΔDFII10 + ΔT10YIE` is taken from the script's `decomposition` object; T10YIE may be FRED-direct or `derived` (`DGS10 − DFII10`) — when derived the identity holds by construction (confirms attribution, not an independent cross-check). Never substitute a **level** (e.g. breakeven level 2.4%) for a Δ; if the script reports no daily history, output spot levels and `本週 Δ 分解不可用`.
 
-Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, AI compute supply/demand and overcapacity risk, PBoC aggregate financing, Asian regulator approvals from KRX / TWSE / JPX, upcoming AI IPO timing, analyst TP upgrade decomposition, AI infrastructure debt financing / vendor-financing loops, private-credit / non-bank fund liquidity stress) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure. All other items are required; if API, direct fetch, and WebSearch paths all fail to obtain a current usable value, mark `⛔ FETCH FAILED` (for example, required FRED series BAMLC0A0CM / IG OAS must not be marked ✗ NOT DISCLOSED after a 403 or API failure).
+Best-effort items — those explicitly tagged in `# Data sources` (AI token volume growth, hyperscaler AI customer concentration, OpenAI / Anthropic revenue, AI compute supply/demand and overcapacity risk, PBoC aggregate financing, non-US regulator approvals from KRX / TWSE / JPX / ESMA, upcoming AI IPO timing, analyst TP upgrade decomposition, AI infrastructure debt financing / vendor-financing loops, private-credit / non-bank fund liquidity stress) — may be marked ✗ NOT DISCLOSED instead of ⛔ FETCH FAILED. ✗ NOT DISCLOSED is not a failure. All other items are required; if API, direct fetch, and WebSearch paths all fail to obtain a current usable value, mark `⛔ FETCH FAILED` (for example, required FRED series BAMLC0A0CM / IG OAS must not be marked ✗ NOT DISCLOSED after a 403 or API failure).
 
 **Required vs best-effort 一覽**（權威標記在各 `# Data sources` bullet 上；下表僅為導覽，與 bullet 衝突時以 bullet 為準）：
 
 | | 項目 |
 |---|---|
-| **Best-effort**（可 `✗ NOT DISCLOSED`） | analyst TP upgrade decomposition；AI token volume growth；hyperscaler 客戶集中度；OpenAI / Anthropic 營收；AI compute 供需／過剩；PBoC aggregate financing；非美槓桿核准（KRX / TWSE / JPX）；upcoming AI IPO timing；AI infrastructure debt financing / vendor-financing loops；private-credit / 非銀基金贖回壓力 |
+| **Best-effort**（可 `✗ NOT DISCLOSED`） | analyst TP upgrade decomposition；AI token volume growth；hyperscaler 客戶集中度；OpenAI / Anthropic 營收；AI compute 供需／過剩；PBoC aggregate financing；非美槓桿核准（KRX / TWSE / JPX / ESMA）；upcoming AI IPO timing；AI infrastructure debt financing / vendor-financing loops；private-credit / 非銀基金贖回壓力 |
 | **Required**（須 `✓ API/DIRECT/SEARCH-VERIFIED` 或 `⛔ FETCH FAILED`，不得 `✗`） | 其餘全部——含 FRED 全序列（DGS10 / DFII10 / T10YIE / BAMLH0A0HYM2 HY OAS / BAMLC0A0CM IG OAS / DFEDTARU·DFEDTARL / WALCL / DCOILWTICO）、S&P 500 P/E・CAPE、Mag 7 P/E、RSP/SPY 廣度、Top-10 集中度、A/D、CNN F&G、Margin Debt、AAII、0DTE / options volume、美國槓桿 ETF AUM、VIX / SKEW、IPO heat、insider Form 4、ECB・BOJ |
 
 **Timeout policy:** If any single direct fetch exceeds ~90 seconds, try the source's API or WebSearch path if available. If no path returns a current usable value, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
@@ -216,7 +216,13 @@ For every mandatory item above: if current evidence is unavailable or a source f
 
 ## §3 三角訊號
 | 指標 | 本次數值 | vs 前次 |
-<§3 分段解讀：三者狀態 / 格局轉變 / 10Y 成因拆解 / 扳機鏈 / ⚠ 結論，見 §3 規格>
+
+**三者狀態**：<穩定共存 / 同向偏高 / 分歧；下接三條 bullet>
+**格局轉變**：<一句>
+**10Y 成因拆解**：<ΔDFII10、ΔT10YIE（bps）、判定>
+**扳機鏈**：<油 → 通膨預期 → Fed 受限 → refinancing>
+**結論**：<歷史意義 + 是否擊發；觸發加 ⚠>
+（以上五段一律用粗體小標、非 `##` / `###` 標題，詳見 §3 規格）
 
 ## 六維度評分
 
@@ -350,7 +356,7 @@ Score based on:
 
 ## 綜合分數
 
-Weighted total 0-100 using weights 22/13/18/12/20/15 + risk tier label (低 / 溫和 / 警戒 / 高 / 極度狂熱).
+Weighted total 0-100 using weights 22/13/18/12/20/15 + risk tier label (低 / 溫和 / 警戒 / 高 / 極度狂熱). These six weights are fixed and must always sum to 100 (22+13+18+12+20+15); if any single weight is ever changed, adjust the others so the total stays 100.
 
 ## 歷史泡沫週期對比
 
@@ -429,6 +435,7 @@ This write-method restriction applies only to archive writes / GitHub API mutati
    - `report-<YYYY-MM-DD>/report.md` — the full markdown report
    - Commit / PR title: `archive <YYYY-MM-DD>`
    - Target branch: `main` (if the connector opens a PR to get there, merge it in-session; leave nothing open)
+   - Atomicity: both files must land together. If only one file writes (e.g. `score.json` succeeds but `report.md` fails), treat the archive write as failed — state which file is missing per step 4 below, and do not leave a `score.json`-only folder behind, since the next run's prior-run check (now requiring both files) would skip it anyway.
 2. **If folder `report-<YYYY-MM-DD>/` already exists for today** (same-day re-run, e.g. RUN NOW after a prompt change): **overwrite it in place** with the freshly generated report and scores. Do not skip. The date-keyed scheme overwrites the same two files, so a same-day re-run costs only one extra commit, not folder churn; the latest run for a given date should always be the committed version. (There is no `FORCE COMMIT` flag — overwrite is the default, because the claude.ai RUN NOW trigger cannot pass ad-hoc invocation strings.)
 3. Note: the prior-run reference (see `# Prior run reference`) filters strictly to dates **before** today, so overwriting today's folder never makes the run read its own write for Δ.
 4. If the connector call fails (auth, rate limit, network, or insufficient permission / scope — e.g. the connector is present but cannot write to the repo or cannot merge to `main`), state the actual error at the end of the report, naming the repo, the target branch, and which operation was denied (write vs merge); do not silently skip and do not fall back to local git, gh CLI, or any other write method.
