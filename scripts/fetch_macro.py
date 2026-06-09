@@ -8,7 +8,7 @@ one JSON block to stdout. Never prints API keys. stdlib only.
 Usage: python3 fetch_macro.py <prior_run_date YYYY-MM-DD | none>
 """
 import json, os, sys, urllib.request, urllib.error
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 UA = {"User-Agent": "bubble-risk-weekly"}
 FRED_KEY = os.environ.get("FRED_API_KEY", "")
@@ -21,7 +21,11 @@ FRED_SERIES = {
     "BAMLH0A0HYM2": "pct", "BAMLC0A0CM": "pct",
     "DFEDTARU": "pct", "DFEDTARL": "pct", "WALCL": "usd_mn", "DCOILWTICO": "usd",
     "ECBASSETSW": "eur_mn", "JPNASSETS": "jpy_100mn",
+    "BOGZ1FL153064486Q": "level",
 }
+
+# Quarterly series need a wider window so the latest (often months-old) print is in range
+QUARTERLY_SERIES = {"BOGZ1FL153064486Q"}
 
 def _get(url, timeout=20):
     req = urllib.request.Request(url, headers=UA)
@@ -30,10 +34,12 @@ def _get(url, timeout=20):
 
 def fred_obs(series_id):
     """Return list of (date, float) desc, newest first. Raises on failure."""
-    start = "2025-01-01"
+    lookback = 540 if series_id in QUARTERLY_SERIES else 21
+    default_back = 540 if series_id in QUARTERLY_SERIES else 120
+    start = (datetime.now(timezone.utc) - timedelta(days=default_back)).strftime("%Y-%m-%d")
     if PRIOR != "none":
         try:
-            start = (datetime.strptime(PRIOR, "%Y-%m-%d") - timedelta(days=21)).strftime("%Y-%m-%d")
+            start = (datetime.strptime(PRIOR, "%Y-%m-%d") - timedelta(days=lookback)).strftime("%Y-%m-%d")
         except ValueError:
             pass
     url = ("https://api.stlouisfed.org/fred/series/observations"
@@ -49,7 +55,7 @@ def fred_obs(series_id):
 
 def treasury_10y(real=False):
     """US Treasury daily yield curve fallback for DGS10 / DFII10. Returns desc list."""
-    year = datetime.utcnow().strftime("%Y")
+    year = datetime.now(timezone.utc).strftime("%Y")
     ds = "daily_treasury_real_yield_curve" if real else "daily_treasury_yield_curve"
     field = "TC_10YEAR" if real else "BC_10YEAR"
     url = ("https://home.treasury.gov/resource-center/data-chart-center/"
@@ -92,7 +98,7 @@ def series_block(sid, unit):
         obs = fred_obs(sid)
         if obs:
             source = "FRED API"
-    except (urllib.error.URLError, urllib.error.HTTPError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError):  # OSError covers URLError / HTTPError / TimeoutError
         obs = []
     # fallbacks for the rate series
     if not obs and sid in ("DGS10", "DFII10"):
@@ -100,14 +106,14 @@ def series_block(sid, unit):
             obs = treasury_10y(real=(sid == "DFII10"))
             if obs:
                 source = "US Treasury"
-        except Exception:
+        except (OSError, ValueError, KeyError):
             obs = []
     if not obs and sid == "DCOILWTICO" and EIA_KEY:
         try:
             obs = eia_wti()
             if obs:
                 source = "EIA"
-        except Exception:
+        except (OSError, ValueError, KeyError):
             obs = []
     if not obs:
         return {"status": "fetch_failed", "source": None}
@@ -118,8 +124,43 @@ def series_block(sid, unit):
     if prior and prior[0] != latest[0]:
         delta = latest[1] - prior[1]
         res["prior_date"], res["prior"] = prior[0], prior[1]
-        res["delta_bps"] = round(delta * 100, 1) if unit == "pct" else None
+        if unit == "pct":
+            res["delta_bps"] = round(delta * 100, 1)
         res["delta_abs"] = round(delta, 3)
+    return res
+
+def sp500_trend():
+    """Fetch S&P 500 daily and compute 200-DMA / 52-week MA and % deviation."""
+    start = (datetime.now(timezone.utc) - timedelta(days=600)).strftime("%Y-%m-%d")
+    url = ("https://api.stlouisfed.org/fred/series/observations"
+           f"?series_id=SP500&api_key={FRED_KEY}&file_type=json"
+           f"&observation_start={start}&sort_order=desc")
+    try:
+        data = json.loads(_get(url))
+    except (OSError, ValueError):  # OSError covers URLError / HTTPError / TimeoutError
+        return {"status": "fetch_failed", "source": None}
+    obs = []
+    for o in data.get("observations", []):
+        v = o.get("value", ".")
+        if v not in (".", ""):
+            obs.append((o["date"], float(v)))  # newest-first
+    if len(obs) < 200:
+        return {"status": "fetch_failed", "source": "FRED API"}
+    vals = [v for _, v in obs]
+    latest_date, latest = obs[0]
+    ma200 = sum(vals[:200]) / 200
+    res = {"status": "ok", "source": "FRED API",
+           "latest_date": latest_date, "latest": round(latest, 2),
+           "ma200": round(ma200, 2),
+           "dev200_pct": round((latest - ma200) / ma200 * 100, 2)}
+    if len(vals) >= 252:
+        ma52w = sum(vals[:252]) / 252
+        res["ma52w"] = round(ma52w, 2)
+        res["dev52w_pct"] = round((latest - ma52w) / ma52w * 100, 2)
+    prior = pick(obs, PRIOR) if PRIOR != "none" else None
+    if prior and prior[0] != latest_date:
+        res["prior_spot_date"], res["prior_spot"] = prior[0], round(prior[1], 2)
+        res["chg_pct"] = round((latest - prior[1]) / prior[1] * 100, 2)
     return res
 
 def main():
@@ -127,6 +168,7 @@ def main():
            "eia_key_present": bool(EIA_KEY), "series": {}}
     for sid, unit in FRED_SERIES.items():
         out["series"][sid] = series_block(sid, unit)
+    out["sp500_trend"] = sp500_trend()
     # T10YIE derive fallback if it failed but DGS10/DFII10 ok
     t = out["series"].get("T10YIE", {})
     if t.get("status") != "ok":
