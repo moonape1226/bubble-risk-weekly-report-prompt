@@ -10,6 +10,7 @@ You are producing a twice-weekly market bubble risk report in Traditional Chines
 | Actual cap hit / constrained payout event | gate proration / breach | 閘門、觸及贖回上限、gate hit |
 | Flow direction trigger | net inflow→outflow flip | 資金流出反轉、流入轉流出 |
 | AI infrastructure financing leverage | AI infrastructure debt financing / vendor-financing loops | AI 私募信貸、data-center debt stress、vendor financing |
+| §3 / D5 trigger-state label | 扳機狀態：未擊發 / 初啟 / 已擊發 | 觸發狀態、點火、trigger fired、扳機已扣 |
 
 # Task
 
@@ -84,7 +85,7 @@ For `✓ SEARCH-VERIFIED`, record in 數據附錄: search query, result title, r
 
 **Source-preferred method:** Data-source bullets may include a `[primary: ...]` tag. Known-403 / WAF-protected sources tagged `[primary: SEARCH]` should use WebSearch first, without spending a mandatory WebFetch round. Untagged sources default to `[primary: DIRECT]` with `✓ SEARCH-VERIFIED` as an allowed secondary path.
 
-**Macro-data fetch (run the deterministic script first):** The macro series (`DGS10`, `DFII10`, `T10YIE`, `BAMLH0A0HYM2`, `BAMLC0A0CM`, `DFEDTARU`, `DFEDTARL`, `WALCL`, `DCOILWTICO`, `ECBASSETSW`, `JPNASSETS`, `BOGZ1FL153064486Q`) are fetched by a script, not by WebFetch. The script additionally fetches `SP500` daily history and computes the S&P 500 200-day / 52-week MA price-trend deviation, emitted as a separate `sp500_trend` block (not a `series` entry). WebFetch to FRED hosts is WAF-blocked (HTTP 403) from this runtime, but **Python `urllib` over Bash with a custom User-Agent reaches FRED's API directly** (this is the method the sibling routine "US Portfolio Weekly Sell-Radar" uses successfully). Run, before scoring:
+**Macro-data fetch (run the deterministic script first):** The macro series (`DGS10`, `DFII10`, `T10YIE`, `BAMLH0A0HYM2`, `BAMLC0A0CM`, `DFEDTARU`, `DFEDTARL`, `WALCL`, `DCOILWTICO`, `ECBASSETSW`, `JPNASSETS`, `BOGZ1FL153064486Q`, `T5YIFR`, `CPIAUCSL`) are fetched by a script, not by WebFetch. The script additionally fetches `SP500` daily history and computes the S&P 500 200-day / 52-week MA price-trend deviation, emitted as a separate `sp500_trend` block (not a `series` entry). WebFetch to FRED hosts is WAF-blocked (HTTP 403) from this runtime, but **Python `urllib` over Bash with a custom User-Agent reaches FRED's API directly** (this is the method the sibling routine "US Portfolio Weekly Sell-Radar" uses successfully). Run, before scoring:
 
 ```
 python3 scripts/fetch_macro.py <prior-run-date | none>
@@ -93,7 +94,7 @@ python3 scripts/fetch_macro.py <prior-run-date | none>
 - `scripts/fetch_macro.py` lives in the `bubble-risk-weekly-report-prompt` repo (cloned as a source). If it is not on disk, WebFetch `https://raw.githubusercontent.com/moonape1226/bubble-risk-weekly-report-prompt/main/scripts/fetch_macro.py` and write it to `/tmp/fetch_macro.py`, then run that. Pass the prior-run date from the `# Prior run reference` step (or `none` for 基準日).
 - The script reads `FRED_API_KEY` / `EIA_API_KEY` from the environment itself, fetches each series via FRED API (urllib + UA), falls back to US Treasury (rates) / EIA (WTI), computes weekly-change deltas vs the prior-run date and the 10Y decomposition, and prints one JSON block between `===MACRO_JSON_START===` / `===MACRO_JSON_END===`.
 - Parse that JSON. Use each series' `latest` / `latest_date` and, for the 10Y rate series, `delta_bps` and the `decomposition` object directly — do not re-fetch these by WebSearch when the script returned `status: ok` / `derived`.
-- From the `sp500_trend` block use `latest`, `ma200`, `dev200_pct`, and (if present) `ma52w` / `dev52w_pct` for the S&P 500 price-trend deviation input (估值溢價 scoring + §2 anchor); also use `prior_spot` / `prior_spot_date` / `chg_pct` (when present) as the S&P 500 「本次 / vs 前次」 values in the §3 三角訊號 table — this is script-sourced and deterministic, so do not re-derive the S&P 500 prior level from Yahoo history. If `sp500_trend.status == fetch_failed`, report the S&P 500 spot level only and state `本週趨勢偏離不可用——無日序資料`; never fabricate a deviation. Use `BOGZ1FL153064486Q` `latest` / `latest_date` as the household equity allocation level (散戶情緒); it is quarterly, so most weekly runs reuse the latest quarter — cite its `latest_date` quarter and do not compute a weekly Δ.
+- From the `sp500_trend` block use `latest`, `ma200`, `dev200_pct`, and (if present) `ma52w` / `dev52w_pct` for the S&P 500 price-trend deviation input (估值溢價 scoring + §2 anchor); also use `prior_spot` / `prior_spot_date` / `chg_pct` (when present) as the S&P 500 「本次 / vs 前次」 values in the §3 三角訊號 table — this is script-sourced and deterministic, so do not re-derive the S&P 500 prior level from Yahoo history. If `sp500_trend.status == fetch_failed`, report the S&P 500 spot level only and state `本週趨勢偏離不可用——無日序資料`; never fabricate a deviation. Use `BOGZ1FL153064486Q` `latest` / `latest_date` as the household equity allocation level (散戶情緒); it is quarterly, so most weekly runs reuse the latest quarter — cite its `latest_date` quarter and do not compute a weekly Δ. Use `CPIAUCSL` `yoy_pct` / `latest_date` as the realized CPI YoY input (monthly stock-of-state — most runs carry the latest print forward; cite its data month, no weekly Δ) and `T5YIFR` `latest` / `delta_bps` as the 5y5y forward inflation-expectations input; both feed the D5 / §3 Fed-constraint read.
 - For any series with `status: fetch_failed`, fall back to WebSearch for the current spot value (mark `✓ SEARCH-VERIFIED`, spot-only / no daily history). If `decomposition.status == "unavailable_no_daily_history"`, report the spot levels and state `本週 Δ 分解不可用——無日序資料`; never fabricate a Δ.
 - Status mapping for the Coverage table: script `ok` → `✓ API`; `derived` → `derived`; `fetch_failed` then WebSearch success → `✓ SEARCH-VERIFIED`; all paths fail → `⛔ FETCH FAILED`.
 - **Macro-fetch decision branch (single source of truth for script outcomes):** (a) script runs and returns JSON → use each series' values per the bullets above; (b) JSON returns with some series `status: fetch_failed` → WebSearch **only those** series for spot values; (c) the script cannot run as a whole — `python3` unavailable, the script is absent from disk *and* the raw-GitHub fallback fetch also fails, `FRED_API_KEY` missing/invalid so every series errors, or a non-zero exit with no `===MACRO_JSON_START===` / `===MACRO_JSON_END===` block — then WebSearch the current spot value for **all** macro series (mark each `✓ SEARCH-VERIFIED` spot-only, or `⛔ FETCH FAILED` where even WebSearch yields nothing), state `本週 Δ 分解不可用——腳本未能執行` for the 10Y decomposition, and proceed to scoring. The macro fallback is always per-series WebSearch, never abort-the-report and never a blanket re-fetch of series the script already returned `ok` / `derived`.
@@ -108,8 +109,8 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 
 | | 項目 |
 |---|---|
-| **Best-effort**（可 `✗ NOT DISCLOSED`） | analyst TP upgrade decomposition；AI token volume growth；hyperscaler 客戶集中度；OpenAI / Anthropic 營收；AI compute 供需／過剩；PBoC aggregate financing；非美槓桿核准（KRX / TWSE / JPX / ESMA）；upcoming AI IPO timing；AI infrastructure debt financing / vendor-financing loops；private-credit / 非銀基金贖回壓力；BofA / JPM 機構調查（月頻）；社交情緒代理（Reddit / X）；NAAIM Exposure Index（週頻） |
-| **Required**（須 `✓ API/DIRECT/SEARCH-VERIFIED` 或 `⛔ FETCH FAILED`，不得 `✗`） | 其餘全部——含 FRED 全序列（DGS10 / DFII10 / T10YIE / BAMLH0A0HYM2 HY OAS / BAMLC0A0CM IG OAS / DFEDTARU·DFEDTARL / WALCL / DCOILWTICO）、S&P 500 P/E・CAPE、Mag 7 P/E、RSP/SPY 廣度、Top-10 集中度、A/D、CNN F&G、Margin Debt、AAII、0DTE / options volume、美國槓桿 ETF AUM、VIX / SKEW、IPO heat、+AI rename / SPAC 掃描、microcap moonshots、insider Form 4、ECB・BOJ、S&P 500 趨勢偏離（200-DMA/52週MA，由 SP500 計算）、家庭持股佔金融資產比（BOGZ1FL153064486Q） |
+| **Best-effort**（可 `✗ NOT DISCLOSED`） | analyst TP upgrade decomposition；AI token volume growth；hyperscaler 客戶集中度；OpenAI / Anthropic 營收；AI compute 供需／過剩；PBoC aggregate financing；非美槓桿核准（KRX / TWSE / JPX / ESMA）；upcoming AI IPO timing；AI infrastructure debt financing / vendor-financing loops；private-credit / 非銀基金贖回壓力；BofA / JPM 機構調查（月頻）；社交情緒代理（Reddit / X）；NAAIM Exposure Index（週頻）；Cboe equity put/call ratio；CME FedWatch 隱含路徑 |
+| **Required**（須 `✓ API/DIRECT/SEARCH-VERIFIED` 或 `⛔ FETCH FAILED`，不得 `✗`） | 其餘全部——含 FRED 全序列（DGS10 / DFII10 / T10YIE / BAMLH0A0HYM2 HY OAS / BAMLC0A0CM IG OAS / DFEDTARU·DFEDTARL / WALCL / DCOILWTICO / CPIAUCSL CPI YoY / T5YIFR）、S&P 500 P/E・CAPE、Mag 7 P/E、RSP/SPY 廣度、Top-10 集中度、A/D、CNN F&G、Margin Debt、AAII、0DTE / options volume、美國槓桿 ETF AUM、VIX / SKEW、IPO heat、+AI rename / SPAC 掃描、microcap moonshots、insider Form 4、ECB・BOJ、S&P 500 趨勢偏離（200-DMA/52週MA，由 SP500 計算）、家庭持股佔金融資產比（BOGZ1FL153064486Q） |
 
 **Timeout policy:** If any single direct fetch exceeds ~90 seconds, try the source's API or WebSearch path if available. If no path returns a current usable value, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
 
@@ -131,7 +132,7 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 ## Retail Sentiment
 
 - CNN Fear & Greed Index: cnn.com/markets/fear-and-greed [primary: SEARCH] (record the exact result URL / date)
-- Margin Debt: FINRA monthly data; also compute margin debt / total US equity market cap (Wilshire 5000 / FRED WILL5000IND if available, or S&P 500 market cap proxy) to avoid scoring absolute debt level alone. Required, monthly stock-of-state: on a run with no new FINRA print since the prior run, carry forward the latest monthly figure, cite its source month, and treat it as current; do not mark ⛔ FETCH FAILED merely because no new month landed (exempt from the within-window rule per Constraints)
+- Margin Debt: FINRA monthly data; also compute margin debt / total US equity market cap (Wilshire 5000 / FRED WILL5000IND if available, or S&P 500 market cap proxy) and the YoY % change（歷史上 YoY ≥ +40–50% 屢現於 1999 / 2007 / 2021 頂部附近）to avoid scoring absolute debt level alone. Required, monthly stock-of-state: on a run with no new FINRA print since the prior run, carry forward the latest monthly figure, cite its source month, and treat it as current; do not mark ⛔ FETCH FAILED merely because no new month landed (exempt from the within-window rule per Constraints)
 - Retail survey: AAII Investor Sentiment [primary: SEARCH]
 - Social sentiment proxies (best-effort): Reddit r/wallstreetbets top weekly posts, X (Twitter) cashtag chatter on meme tickers — soft proxy signals; if no notable chatter this run, mark ✗ NOT DISCLOSED rather than ⛔ FETCH FAILED
 - Household equity allocation: FRED series `BOGZ1FL153064486Q` (households' directly + indirectly held corporate equities as % of financial assets), quarterly, fetched by `scripts/fetch_macro.py`. Near historic highs = households fully invested with limited room to add (Farrell rule #5). Stock-of-state, quarterly — most runs carry no new print; exempt from the within-window publication rule like CAPE / margin debt, but cite the latest quarter's `latest_date`. Required (WebSearch spot only if the script reports `fetch_failed`, else ⛔ FETCH FAILED; never ✗ NOT DISCLOSED)
@@ -152,6 +153,9 @@ All series below are fetched by `scripts/fetch_macro.py` (see "Macro-data fetch"
 - 10Y Treasury real yield / TIPS: FRED series DFII10 (script fallback: US Treasury `TC_10YEAR`)
 - 10Y breakeven inflation rate: FRED series T10YIE (script fallback: derived DGS10 − DFII10)
 - WTI crude oil price: FRED series DCOILWTICO (script fallback: EIA `RWTC`)
+- CPI YoY: FRED series CPIAUCSL (monthly; the script computes `yoy_pct` vs the year-ago print; required, stock-of-state — most runs carry the latest month forward, cite its data month; exempt from the within-window rule like margin debt)
+- 5y5y forward inflation expectation: FRED series T5YIFR (daily; required)
+- Fed funds rate path expectations: CME FedWatch implied policy-rate path [primary: SEARCH] (best-effort; Reuters / CME Group summaries acceptable; if no current snapshot found, mark ✗ NOT DISCLOSED — its absence must not lower the D5 primary score)
 - Fed balance sheet: FRED series WALCL (weekly)
 - Global central bank liquidity cross-check — ECB / BOJ balance sheets: ECB (FRED series ECBASSETSW) and BOJ (FRED series JPNASSETS), both fetched by the script like the other macro series (required — WebSearch spot if the script reports `fetch_failed`, else ⛔ FETCH FAILED; never ✗ NOT DISCLOSED)
 - PBoC aggregate financing / liquidity operations (best-effort): if no current PBoC / NBS English summary found, mark ✗ NOT DISCLOSED
@@ -174,6 +178,7 @@ All series below are fetched by `scripts/fetch_macro.py` (see "Macro-data fetch"
 - **Microcap thematic moonshots [primary: SEARCH]**: scan the week's biggest single-day stock movers for tickers under $1B market cap that gained ≥100% in one session (or sustained ≥50% over 2-3 sessions). Qualify the move as a moonshot signal only if the catalyst is a press release / 8-K / corporate announcement that stacks **two or more** hot themes (e.g. quantum computing, AI, lunar / space / NASA, fusion, robotics, defense, autonomous, nuclear, gene editing, weight-loss, crypto-treasury) **against weak fundamentals** (most recent quarterly revenue ≤ $5M, negative EBITDA, low cash). For each qualifying ticker record: ticker, single-day %, market cap, stacked themes, last-quarter revenue, cash position, and the source press release URL. Sources: Finviz biggest-gainers screener, Benzinga / MarketWatch movers, Yahoo Finance day's gainers, StockTwits trending. Example pattern (Astrotech ASTC, 2026-05-27, +516%): quantum + lunar + NASA stacked on quarterly revenue $343k. Required weekly screen — a week with zero qualifying tickers is `✓ SEARCH-VERIFIED（0 件）`, never ✗ NOT DISCLOSED.
 - Upcoming AI IPOs: OpenAI, Anthropic, xAI, SpaceX timing and valuation (cite concrete S-1 filing or named-source report within the past 30 days; if none, mark ✗ NOT DISCLOSED rather than reporting unsourced rumor)
 - Insider selling at AI / market-leadership companies: Form 4 clusters and sale-to-buy ratio [primary: SEC EDGAR]. Every named insider or dollar-amount claim must include Form 4 filing date, transaction date, issuer ticker, SEC EDGAR filing URL, and sale/buy amount within the past 14 days. If no qualifying filing-level details are found within the past 14 days, mark `✓ SEARCH-VERIFIED（0 件）` (the screen ran; nothing qualified — this is a required item, so ✗ NOT DISCLOSED is forbidden) and do not report stale names or dollar amounts from older news.
+- Cboe equity-only put/call ratio [primary: SEARCH] (best-effort): from Cboe daily market statistics / YCharts / MacroMicro. Sustained low readings（如 < 0.50）= call-heavy directional speculation. Confirmation cross-check inside 投機行為 scoring, not a primary input; if no current value is found, mark ✗ NOT DISCLOSED — its absence must not lower the D3 primary score.
 
 ## Structural Leverage
 
@@ -229,7 +234,7 @@ For every mandatory item above: if current evidence is unavailable or a source f
 **格局轉變**：<一句>
 **10Y 成因拆解**：<ΔDFII10、ΔT10YIE（bps）、判定>
 **扳機鏈**：<油 → 通膨預期 → Fed 受限 → refinancing>
-**結論**：<歷史意義 + 是否擊發；觸發加 ⚠>
+**結論**：<扳機狀態：未擊發/初啟/已擊發 ＋ 歷史意義；已擊發或同向偏高加 ⚠>
 （以上五段一律用粗體小標、非 `##` / `###` 標題，詳見 §3 規格）
 
 ## 六維度評分
@@ -262,6 +267,8 @@ For every mandatory item above: if current evidence is unavailable or a source f
 - `## 機構情緒對照` is always emitted, even when it only says `本次無新機構調查數據。`
 - The final visible line is exactly `本報告為相對風險溫度計，非擇時訊號。`, and it is plain text, not a `##` / `###` heading.
 - §3 的五段解讀對股市 / WTI / 10Y 的方向描述與 §3 表格「vs 前次」欄符號（▲ / ▼ / 持平）一致；衝突時已改為以表格數據為準。
+- §3 結論段第一句為「扳機狀態：未擊發／初啟／已擊發」三態之一，且與 D5 rationale 的側別標記一致（D5 標「扳機側」→ 扳機狀態至少「初啟」）。
+- §2 各錨點相似度等於 `## 歷史泡沫週期對比` checklist 命中明細的「命中數 ÷ 特徵數 × 100 取最近 5%」，該節首行為 `相似度計算：checklist v2`；rounded total 落在 18–21 / 38–41 / 63–66 / 83–86 時，`## 綜合分數` 含邊界帶註記。
 - §3「10Y 成因拆解」三項皆為週變動（Δ，bps）；ΔT10YIE 優先取自 FRED `T10YIE` 序列歷史，僅在抓取失敗時以 `DGS10 − DFII10` 推算並標 `derived`，且未把任何水位（如 breakeven 水位）當成 Δ 填入。
 - Before final output, count every bullet under `# Data sources`. The `## 數據附錄` Coverage table row count must equal that bullet count exactly, and each row must carry exactly one status from `✓ API` / `✓ DIRECT` / `✓ SEARCH-VERIFIED` / `derived` / `✗ NOT DISCLOSED` / `⛔ FETCH FAILED`. If row-count ≠ bullet-count, any bullet is duplicated or missing, any row lacks a final status, or any required bullet carries `✗ NOT DISCLOSED`, the report is incomplete; do not output until the count and statuses are fixed.
 - 每個 `✓ SEARCH-VERIFIED` 列在 數據附錄 都含 search query + result URL + 發布／資料日期（或明示「日期不可見」）+ 抓取 timestamp；任何缺欄的列已補齊欄位、或在最終輸出前依 required-vs-best-effort 改標 `⛔ FETCH FAILED` / `✗ NOT DISCLOSED`，不得帶著不完整 traceability 進入最終輸出。例外：`✓ SEARCH-VERIFIED（0 件）` 列依 Fetch protocol 的 Zero-result screens 規則，URL／發布日期欄可為 `—`，但 query、檢查來源、timestamp 仍為必填。
@@ -283,6 +290,7 @@ For each dimension, give a score 0-100 and a one-sentence rationale citing speci
 Score based on:
 
 - S&P 500 P/E, Shiller CAPE vs 10-year average (primary)
+- **Excess CAPE Yield（利率調整後估值交叉檢核）**：`ECY = 1/CAPE − DFII10/100`，由已抓取的 CAPE 與 DFII10 計算（raw-data 表標 `derived`；不新增 Coverage 列——兩個母項已各有列）。ECY 越低＝股相對債越貴，跨時代可比性優於裸 CAPE（CAPE 高位十年的時代裡，利率水位決定它是否真的極端）；接近 0 或轉負屬 1929 / 2000 級別訊號。僅作 CAPE 的 confirmation / 跨時代校準，不單獨計分、不與 CAPE 重複計分。
 - Mag 7 weighted P/E vs historical
 - AI fundamentals reality check: is hyperscaler capex guidance still being raised? Is token growth sustaining? If capex guidance starts being cut, valuation risk rises sharply even if P/E unchanged.
 - AI compute supply/demand reality check: is capacity expansion still being absorbed by utilization, token growth, and paying demand? If GPU rental rates, memory pricing, accelerator lead times, inventory, or earnings-call digestion commentary weaken while capacity is still being added, valuation risk rises even before formal capex guidance is cut. Do not score raw chip / rental price direction alone; score the capacity-vs-demand gap. When no direct utilization / pricing evidence (GPU rental rates, HBM / DRAM pricing, accelerator lead times, order-digestion or capacity-utilization commentary) is obtained this run, do not assert that demand is absorbing capacity; downgrade the conclusion to 「capex / Nvidia 營收仍支撐，但未取得直接利用率證據」 and mark the supporting utilization / pricing items ✗ NOT DISCLOSED.
@@ -316,6 +324,7 @@ Score based on:
 - Insider selling clusters among AI / market leaders
 - OpenAI / Anthropic revenue trajectory (concentration risk indicator)
 - Upcoming mega-IPO pipeline (liquidity drain risk)
+- Cboe equity put/call ratio（confirmation only，持續低檔＝call 方向性投機擁擠；best-effort，缺值不調分）
 
 **Rubric anchor points**（分數愈高＝投機愈狂；moonshot 計數見 Data sources 篩選準則）：
 
@@ -330,7 +339,7 @@ Score based on:
 Score based on:
 
 - CNN Fear & Greed
-- Margin Debt monthly change and margin debt / equity market cap ratio
+- Margin Debt monthly change, YoY % change, and margin debt / equity market cap ratio（YoY ≥ +40–50% 為歷史頂部級別警訊：1999 / 2007 / 2021）
 - AAII retail survey
 - Social sentiment proxies: Reddit r/wallstreetbets top weekly posts, X (Twitter) cashtag chatter on meme tickers
 - Household equity allocation（% of financial assets, FRED `BOGZ1FL153064486Q`, 季頻）：接近歷史高位＝散戶／家庭部位已滿、後續加碼空間有限（Farrell #5）。stock-of-state，多數週沿用最近一季並標註資料季度，不計週 Δ。
@@ -349,7 +358,8 @@ Score based on:
 
 Score based on:
 
-- Fed funds rate path and forward guidance
+- Fed funds rate path and forward guidance（市場隱含路徑取 FedWatch best-effort bullet；抓不到時以 FOMC 聲明敘述為準，不因缺值調分）
+- Realized inflation vs expectations（扳機鏈的 Fed-constraint 診斷）：CPI YoY（`CPIAUCSL` `yoy_pct`，script 供給）與 5y5y forward（`T5YIFR`），與 10Y 分解的 breakeven Δ 合讀。CPI YoY 高檔（如 ≥ 4%）且通膨預期未回落＝Fed 寬鬆空間受壓縮的扳機側證據。CPI 一律引 script 值，不得只靠新聞搜尋偶得。
 - HY OAS level and weekly change
 - IG OAS
 - 10Y nominal yield change decomposition: decompose the **weekly change** of the 10Y, where each term is a Δ in basis points computed per the FRED history rule — `ΔSERIES = current-execution-date observation − prior-run-date observation`, each taken from its own FRED series history (`DGS10`, `DFII10`, `T10YIE`) — then verify `ΔDGS10 ≈ ΔDFII10 + ΔT10YIE`. Prefer fetching T10YIE directly; only if it cannot be fetched, derive it as `DGS10 − DFII10` and mark it `derived` (per the FRED history rule). Never substitute a **level** (e.g. the breakeven level 2.37%) for a Δ. When 10Y rises, identify whether the move is primarily **real-rate-driven**, **breakeven-driven**, or mixed. Any sustained nominal 10Y rise increases valuation-discount pressure and refinancing cost; the decomposition's added value is the Fed reaction-function read: anchored breakevens imply the Fed put is more available in a downturn, while breakeven-driven rises imply inflation expectations are constraining Fed easing and moving the trigger closer. Treat this as a transmission / trigger diagnostic, not as a new dimension.
@@ -419,15 +429,19 @@ Weighted total 0-100 using weights 22/13/18/12/20/15 + risk tier label (低 / �
 
 Assign the tier strictly from this table (e.g. 62 → 警戒). The cutoffs are calibrated so the existing archive's 62 = 警戒 stays consistent; do not improvise a different mapping.
 
+**邊界帶註記：** rounded total 落在任一 tier 邊界 ±2 分內（即 18–21、38–41、63–66、83–86）時，在本節 tier 判定句後加一行：`邊界帶：總分 <X> 距 <左tier>/<右tier> 邊界 ≤ 2 分，評分固有噪音約 ±2–3，等級判讀需保留餘地。` 此註記只出現在 `## 綜合分數`；不改 §1 欄位、不改 tier 判定本身、不寫入 score.json。
+
 ## 歷史泡沫週期對比
 
-For each of the following reference points, give a similarity percentage and a one-line rationale:
+**相似度計算（決定性 checklist，取代自由評估）：** 每個錨點有固定特徵清單（下），逐項依本次六維度分數與已抓取數據判定命中與否；相似度 = 命中數 ÷ 特徵數 × 100，四捨五入到最接近的 5%（降低偽精度與跨期 diff 噪音）。同分時取下列表列順序較前者標「◀ 最貼近」。無資料的特徵（⛔ / ✗）一律記未命中並在明細標「無資料」。§2 表格直接填入此結果；命中明細列在本節——最貼近錨點全列各項命中／未命中，其餘錨點各一行摘要關鍵差異項。本節第一行固定為 `相似度計算：checklist v2`（方法標籤，跨期 diff 用；v2 起與先前的自由評估值不可直接比較）。
 
-- 1997 (early infrastructure buildout)
-- 1998 (LTCM shock, mid-cycle)
-- 1999 (late euphoria)
-- 2000 March (peak)
-- 2021 December (meme + zero-rate peak)
+**錨點特徵清單（每項 1 分，等權；「扳機狀態」見 §3 結論的判定規則）：**
+
+- **1997 早期建設**（8 項）：①估值溢價 40–74；②市場廣度 < 45；③投機行為 < 50；④hyperscaler capex 指引仍上修；⑤散戶情緒 < 55；⑥結構性槓桿 < 50；⑦HY OAS < 4% 且本次未走闊；⑧扳機狀態＝未擊發
+- **1998 LTCM 衝擊**（8 項）：①HY OAS 週 Δ ≥ +30 bps 或 VIX > 25；②S&P 500 距 4 週內高點回檔 ≥ 5%；③具名非銀／槓桿機構壓力事件披露（私募信貸 gate、對沖基金爆雷）；④Fed 路徑轉鴿（FedWatch 隱含寬鬆或實際降息）；⑤估值溢價 ≥ 60；⑥扳機狀態 ≥ 初啟；⑦市場廣度本次 Δ ≥ +8（急轉弱）；⑧ΔT10YIE ≤ 0（通膨預期非主因）
+- **1999 晚期狂熱**（10 項）：①估值溢價 ≥ 75；②CAPE ≥ 38；③投機行為 ≥ 60；④本週 moonshot ≥ 1 或無營收 IPO 佔比偏高；⑤市場廣度 ≥ 45（轉窄）；⑥D5 落自滿側且 HY OAS < 3.5%；⑦結構性槓桿 ≥ 60；⑧散戶情緒 ≥ 55；⑨巨型 IPO pipeline 活躍（30 日內具名 S-1 / 定價）；⑩扳機狀態＝未擊發
+- **2000/3 頂點**（8 項）：①估值溢價 ≥ 85；②扳機狀態 ≥ 初啟；③市場廣度 ≥ 60（極窄）；④`dev200_pct` 自 > +10% 高位回落、或 S&P 距 4 週高點回檔 ≥ 5%；⑤投機行為 ≥ 70；⑥insider 集中賣出（14 日內合格 Form 4 cluster ≥ 1）；⑦散戶情緒 ≥ 65；⑧貨幣轉緊（FedWatch 隱含緊縮、或 ΔT10YIE 主導的 10Y 上行）
+- **2021/12 Meme 頂**（8 項）：①散戶情緒 ≥ 65；②社群投機熱（WSB / cashtag 本週有具名標的）；③結構性槓桿 ≥ 65；④流動性氾濫（央行資產負債表擴張且 D5 ≥ 60 落自滿側）；⑤margin debt YoY ≥ +40%；⑥本週 microcap moonshot ≥ 1；⑦市場廣度 ≥ 50（指數與廣度背離）；⑧CPI YoY ≥ 4% 且 Fed 尚未實質緊縮
 
 Then provide a 2-sentence interpretation: which historical phase does the current week most resemble, and what does that imply about position in the cycle? The similarity assessment should include the 結構性槓桿 dimension, especially for 1999 / 2000 March / 2021 December comparisons. Interpret 結構性槓桿 in period-adjusted terms rather than requiring identical instruments: for 1999 / 2000 March, use proxies such as margin debt, index futures / options speculation, and retail leverage; for 2021 December, use meme leverage, options / 0DTE where available, and leveraged product adoption.
 
@@ -558,7 +572,7 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 | 2000/3 頂點 | 32% | ▰▰▰▱▱▱▱▱▱▱ |  |
 | 2021/12 Meme 頂 | 40% | ▰▰▰▰▱▱▱▱▱▱ |  |
 
-上方為格式範例。最高相似度的列在「標記」欄填「◀ 最貼近」，其餘留白。
+上方為格式範例。最高相似度的列在「標記」欄填「◀ 最貼近」，其餘留白。相似度數值一律來自 `## 歷史泡沫週期對比` 的 checklist v2 計算（命中數 ÷ 特徵數，取最近 5%），不得自由評估。
 
 ### §3 三角訊號
 
@@ -600,9 +614,15 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 - ΔT10YIE 損益平衡通膨週變動：[±X bps、方向]
 - 判定：{real-rate-driven / breakeven-driven / mixed}（依 ΔDFII10 與 ΔT10YIE 何者主導）
 
-**扳機鏈：油 → 通膨預期 → Fed 受限 → refinancing 成本**：描述此鏈當前是否在啟動、Fed put 可得性如何變化（可引用 FOMC 對能源通膨的立場、鷹派異議票數等）。
+**扳機鏈：油 → 通膨預期 → Fed 受限 → refinancing 成本**：描述此鏈當前是否在啟動、Fed put 可得性如何變化（可引用 FOMC 對能源通膨的立場、鷹派異議票數等）。本段必須引用 script 供給的 CPI YoY（`CPIAUCSL` `yoy_pct`，標註資料月份）與 T5YIFR 5y5y forward 水位／週 Δ 作為「通膨預期 → Fed 受限」環節的數據基礎；FedWatch 隱含路徑有抓到時一併引用。CPI 不得只憑新聞搜尋偶得的數字。
 
-**結論**：三者配置的歷史意義 + 當前是否擊發（參照 HY OAS、信用利差、私募信貸贖回壓力、再融資壓力是否出現）。若三者同向偏高或觸發線成立，在本段標題前加 ⚠；基準日或無觸發時不加。
+**結論**：本段第一句固定以「扳機狀態：未擊發／初啟／已擊發」開頭（pinned terms，見 terminology lock）。判定規則（決定性，由重到輕依序檢查，取第一個成立者）：
+
+- **已擊發**＝任一成立：私募信貸 gate proration / breach；多基金 net inflow→outflow flip；HY OAS 週 Δ ≥ +50 bps；具名再融資壓力或信用事件披露。
+- **初啟**＝未達已擊發，但任一成立：breakeven 主導的 10Y 上行且 WTI 同步上行；HY OAS 連續兩次運行走闊；D5 rationale 本次標「扳機側」。
+- **未擊發**＝其餘。基準日無前次可比時，只用無需前次的判據（gate / breach、具名披露），其餘記不成立。
+
+標籤後接三者配置的歷史意義（參照 HY OAS、信用利差、私募信貸贖回壓力、再融資壓力）。若扳機狀態＝已擊發、或三者同向偏高，在本段標題前加 ⚠；其餘不加。此標籤是 §2 checklist 與 D5 的共用輸入，但**不**寫入 score.json（schema 不變；穩定數期後再評估是否如 `regime` 持久化）。
 
 Use §3 as a cross-dimensional interpretation only: valuation + leverage = crash potential energy; financing tightening = timing trigger; alignment of all three is the high-risk configuration. Do not reweight the six dimensions, change their independent scores, or double-count inputs for this guide.
 

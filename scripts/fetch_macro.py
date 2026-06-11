@@ -22,10 +22,14 @@ FRED_SERIES = {
     "DFEDTARU": "pct", "DFEDTARL": "pct", "WALCL": "usd_mn", "DCOILWTICO": "usd",
     "ECBASSETSW": "eur_mn", "JPNASSETS": "jpy_100mn",
     "BOGZ1FL153064486Q": "level",
+    "T5YIFR": "pct", "CPIAUCSL": "level",
 }
 
-# Quarterly series need a wider window so the latest (often months-old) print is in range
+# Low-frequency series need a wider window: quarterly prints are often
+# months old, and YoY series need the year-ago base observation in range
 QUARTERLY_SERIES = {"BOGZ1FL153064486Q"}
+YOY_SERIES = {"CPIAUCSL"}
+WIDE_WINDOW_SERIES = QUARTERLY_SERIES | YOY_SERIES
 
 def _get(url, timeout=20):
     req = urllib.request.Request(url, headers=UA)
@@ -34,8 +38,8 @@ def _get(url, timeout=20):
 
 def fred_obs(series_id):
     """Return list of (date, float) desc, newest first. Raises on failure."""
-    lookback = 540 if series_id in QUARTERLY_SERIES else 21
-    default_back = 540 if series_id in QUARTERLY_SERIES else 120
+    lookback = 540 if series_id in WIDE_WINDOW_SERIES else 21
+    default_back = 540 if series_id in WIDE_WINDOW_SERIES else 120
     start = (datetime.now(timezone.utc) - timedelta(days=default_back)).strftime("%Y-%m-%d")
     if PRIOR != "none":
         try:
@@ -127,6 +131,13 @@ def series_block(sid, unit):
         if unit == "pct":
             res["delta_bps"] = round(delta * 100, 1)
         res["delta_abs"] = round(delta, 3)
+    if sid in YOY_SERIES:
+        base_target = (datetime.strptime(latest[0], "%Y-%m-%d")
+                       - timedelta(days=365)).strftime("%Y-%m-%d")
+        base = pick(obs, base_target)
+        if base:
+            res["yoy_base_date"], res["yoy_base"] = base[0], base[1]
+            res["yoy_pct"] = round((latest[1] / base[1] - 1) * 100, 2)
     return res
 
 def sp500_trend():
