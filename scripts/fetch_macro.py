@@ -130,6 +130,8 @@ def series_block(sid, unit):
         res["prior_date"], res["prior"] = prior[0], prior[1]
         if unit == "pct":
             res["delta_bps"] = round(delta * 100, 1)
+        if unit == "usd" and prior[1]:
+            res["chg_pct"] = round(delta / prior[1] * 100, 2)
         res["delta_abs"] = round(delta, 3)
     if sid in YOY_SERIES:
         base_target = (datetime.strptime(latest[0], "%Y-%m-%d")
@@ -193,6 +195,10 @@ def main():
     for k in ("DGS10", "DFII10", "T10YIE"):
         s = out["series"].get(k, {})
         d[k] = s.get("delta_bps")
+    # T10YIE may be level-derived (DGS10 - DFII10) with no daily-history delta;
+    # reconstruct its weekly delta from the identity so the third term and driver hold.
+    if d["T10YIE"] is None and d["DGS10"] is not None and d["DFII10"] is not None:
+        d["T10YIE"] = round(d["DGS10"] - d["DFII10"], 1)
     if all(d[k] is not None for k in ("DGS10", "DFII10")):
         out["decomposition"] = {
             "d_dgs10_bps": d["DGS10"], "d_dfii10_bps": d["DFII10"],

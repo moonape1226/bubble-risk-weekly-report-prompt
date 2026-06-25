@@ -97,7 +97,7 @@ python3 scripts/fetch_macro.py <prior-run-date | none>
 - From the `sp500_trend` block use `latest`, `ma200`, `dev200_pct`, and (if present) `ma52w` / `dev52w_pct` for the S&P 500 price-trend deviation input (估值溢價 scoring + §2 anchor); also use `prior_spot` / `prior_spot_date` / `chg_pct` (when present) as the S&P 500 「本次 / vs 前次」 values in the §3 三角訊號 table — this is script-sourced and deterministic, so do not re-derive the S&P 500 prior level from Yahoo history. If `sp500_trend.status == fetch_failed`, report the S&P 500 spot level only and state `本週趨勢偏離不可用——無日序資料`; never fabricate a deviation. Use `BOGZ1FL153064486Q` `latest` / `latest_date` as the household equity allocation level (散戶情緒); it is quarterly, so most weekly runs reuse the latest quarter — cite its `latest_date` quarter and do not compute a weekly Δ. Use `CPIAUCSL` `yoy_pct` / `latest_date` as the realized CPI YoY input (monthly stock-of-state — most runs carry the latest print forward; cite its data month, no weekly Δ) and `T5YIFR` `latest` / `delta_bps` as the 5y5y forward inflation-expectations input; both feed the D5 / §3 Fed-constraint read.
 - For any series with `status: fetch_failed`, fall back to WebSearch for the current spot value (mark `✓ SEARCH-VERIFIED`, spot-only / no daily history). If `decomposition.status == "unavailable_no_daily_history"`, report the spot levels and state `本週 Δ 分解不可用——無日序資料`; never fabricate a Δ.
 - Status mapping for the Coverage table: script `ok` → `✓ API`; `derived` → `derived`; `fetch_failed` then WebSearch success → `✓ SEARCH-VERIFIED`; all paths fail → `⛔ FETCH FAILED`.
-- **Macro-fetch decision branch (single source of truth for script outcomes):** (a) script runs and returns JSON → use each series' values per the bullets above; (b) JSON returns with some series `status: fetch_failed` → WebSearch **only those** series for spot values; (c) the script cannot run as a whole — `python3` unavailable, the script is absent from disk *and* the raw-GitHub fallback fetch also fails, `FRED_API_KEY` missing/invalid so every series errors, or a non-zero exit with no `===MACRO_JSON_START===` / `===MACRO_JSON_END===` block — then WebSearch the current spot value for **all** macro series (mark each `✓ SEARCH-VERIFIED` spot-only, or `⛔ FETCH FAILED` where even WebSearch yields nothing), state `本週 Δ 分解不可用——腳本未能執行` for the 10Y decomposition, and proceed to scoring. The macro fallback is always per-series WebSearch, never abort-the-report and never a blanket re-fetch of series the script already returned `ok` / `derived`.
+- **Macro-fetch decision branch (single source of truth for script outcomes):** (a) script runs and returns JSON → use each series' values per the bullets above; (b) JSON returns with some or all series `status: fetch_failed` (the block was still printed — including the case where every series failed, e.g. `FRED_API_KEY` missing/invalid) → WebSearch **only those** failed series for spot values; (c) the script emits no `===MACRO_JSON_START===` / `===MACRO_JSON_END===` block at all — `python3` unavailable, the script is absent from disk *and* the raw-GitHub fallback fetch also fails, or a non-zero exit with no block — then WebSearch the current spot value for **all** macro series (mark each `✓ SEARCH-VERIFIED` spot-only, or `⛔ FETCH FAILED` where even WebSearch yields nothing), state `本週 Δ 分解不可用——腳本未能執行` for the 10Y decomposition, and proceed to scoring. The macro fallback is always per-series WebSearch, never abort-the-report and never a blanket re-fetch of series the script already returned `ok` / `derived`.
 
 **Key handling (security — required):** Never print `FRED_API_KEY`, `EIA_API_KEY`, or any URL containing `api_key=`, anywhere in the report or 數據附錄 — the report is committed to a shared archive. The script never prints keys; do not echo the environment or the script's command line with keys expanded. Cite rows as `FRED API (series_id=<SERIES>)` / `US Treasury` / `EIA (RWTC)` with keys redacted.
 
@@ -407,7 +407,7 @@ Score based on:
 
 - If 2+ non-US markets approve single-stock leveraged / inverse ETFs in the same week, set this dimension's score floor to 81 and flag 「全球槓桿擴散訊號」.
 - When triggered, 本次新增訊號 must list approving markets, underlying stocks, leverage multiple, and expected AUM / size if available.
-- Any mention of global leveraged-product diffusion anywhere in the report (including 本次新增訊號 and §7-style new-signal summaries) must state this week's trigger state explicitly: if the 「全球槓桿擴散訊號」 did not fire this week, append 「本週擴散訊號未觸發」 so an ongoing background trend is not mis-read as a fresh trigger.
+- Any mention of global leveraged-product diffusion anywhere in the report (including `## 本次新增訊號`) must state this week's trigger state explicitly: if the 「全球槓桿擴散訊號」 did not fire this week, append 「本週擴散訊號未觸發」 so an ongoing background trend is not mis-read as a fresh trigger.
 - AI infrastructure debt financing is a best-effort structural-leverage signal. If no current disclosure is found, mark ✗ NOT DISCLOSED and do not penalize the source coverage score. If disclosed deal amounts are available, include them in 數據附錄 with issuer, amount, date, financing type, and source; use stale disclosures only as background unless they occurred inside the required weekly / monthly window.
 - If AI compute overcapacity evidence is present, use it as a stress trigger / confirmation for AI infrastructure debt analysis, not as a separate structural-leverage score input unless the same sources disclose debt-term deterioration, collateral impairment, refinancing stress, or customer-contract weakness.
 
@@ -438,9 +438,9 @@ Assign the tier strictly from this table (e.g. 62 → 警戒). The cutoffs are c
 **錨點特徵清單（每項 1 分，等權；「扳機狀態」見 §3 結論的判定規則）：**
 
 - **1997 早期建設**（8 項）：①估值溢價 40–74；②市場廣度 < 45；③投機行為 < 50；④hyperscaler capex 指引仍上修；⑤散戶情緒 < 55；⑥結構性槓桿 < 50；⑦HY OAS < 4% 且本次未走闊；⑧扳機狀態＝未擊發
-- **1998 LTCM 衝擊**（8 項）：①HY OAS 週 Δ ≥ +30 bps 或 VIX > 25；②S&P 500 距 4 週內高點回檔 ≥ 5%；③具名非銀／槓桿機構壓力事件披露（私募信貸 gate、對沖基金爆雷）；④Fed 路徑轉鴿（FedWatch 隱含寬鬆或實際降息）；⑤估值溢價 ≥ 60；⑥扳機狀態 ≥ 初啟；⑦市場廣度本次 Δ ≥ +8（急轉弱）；⑧ΔT10YIE ≤ 0（通膨預期非主因）
+- **1998 LTCM 衝擊**（8 項）：①HY OAS 週 Δ ≥ +30 bps 或 VIX > 25；②S&P 500 較前次回檔 ≥ 5%（`sp500_trend.chg_pct ≤ −5`）；③具名非銀／槓桿機構壓力事件披露（私募信貸 gate、對沖基金爆雷）；④Fed 路徑轉鴿（FedWatch 隱含寬鬆或實際降息）；⑤估值溢價 ≥ 60；⑥扳機狀態 ≥ 初啟；⑦市場廣度本次 Δ ≥ +8（急轉弱）；⑧ΔT10YIE ≤ 0（通膨預期非主因）
 - **1999 晚期狂熱**（10 項）：①估值溢價 ≥ 75；②CAPE ≥ 38；③投機行為 ≥ 60；④本週 moonshot ≥ 1 或無營收 IPO 佔比偏高；⑤市場廣度 ≥ 45（轉窄）；⑥D5 落自滿側且 HY OAS < 3.5%；⑦結構性槓桿 ≥ 60；⑧散戶情緒 ≥ 55；⑨巨型 IPO pipeline 活躍（30 日內具名 S-1 / 定價）；⑩扳機狀態＝未擊發
-- **2000/3 頂點**（8 項）：①估值溢價 ≥ 85；②扳機狀態 ≥ 初啟；③市場廣度 ≥ 60（極窄）；④`dev200_pct` 自 > +10% 高位回落、或 S&P 距 4 週高點回檔 ≥ 5%；⑤投機行為 ≥ 70；⑥insider 集中賣出（14 日內合格 Form 4 cluster ≥ 1）；⑦散戶情緒 ≥ 65；⑧貨幣轉緊（FedWatch 隱含緊縮、或 ΔT10YIE 主導的 10Y 上行）
+- **2000/3 頂點**（8 項）：①估值溢價 ≥ 85；②扳機狀態 ≥ 初啟；③市場廣度 ≥ 60（極窄）；④`dev200_pct` 自 > +10% 高位回落、或 S&P 500 較前次回檔 ≥ 5%（`sp500_trend.chg_pct ≤ −5`）；⑤投機行為 ≥ 70；⑥insider 集中賣出（14 日內合格 Form 4 cluster ≥ 1）；⑦散戶情緒 ≥ 65；⑧貨幣轉緊（FedWatch 隱含緊縮、或 ΔT10YIE 主導的 10Y 上行）
 - **2021/12 Meme 頂**（8 項）：①散戶情緒 ≥ 65；②社群投機熱（WSB / cashtag 本週有具名標的）；③結構性槓桿 ≥ 65；④流動性氾濫（央行資產負債表擴張且 D5 ≥ 60 落自滿側）；⑤margin debt YoY ≥ +40%；⑥本週 microcap moonshot ≥ 1；⑦市場廣度 ≥ 50（指數與廣度背離）；⑧CPI YoY ≥ 4% 且 Fed 尚未實質緊縮
 
 Then provide a 2-sentence interpretation: which historical phase does the current week most resemble, and what does that imply about position in the cycle? The similarity assessment should include the 結構性槓桿 dimension, especially for 1999 / 2000 March / 2021 December comparisons. Interpret 結構性槓桿 in period-adjusted terms rather than requiring identical instruments: for 1999 / 2000 March, use proxies such as margin debt, index futures / options speculation, and retail leverage; for 2021 December, use meme leverage, options / 0DTE where available, and leveraged product adoption.
@@ -490,7 +490,7 @@ After all sections above, output a fenced JSON block (label `json`) for the next
   "structural": <int 0-100>,
   "total": <int 0-100, weighted with 22/13/18/12/20/15, half-up rounded>,
   "tier": "<低|溫和|警戒|高|極度狂熱>",
-  "regime": "<穩定共存|同向偏高|分歧|基準日>"
+  "regime": "<穩定共存|同向偏高|分歧|基準日|不可判>"
 }
 ```
 
@@ -567,9 +567,9 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 | 錨點 | 相似度 | 條圖 | 標記 |
 |---|---:|---|---|
 | 1997 早期建設 | 25% | ▰▰▱▱▱▱▱▱▱▱ |  |
-| 1998 LTCM 衝擊 | 28% | ▰▰▱▱▱▱▱▱▱▱ |  |
-| 1999 晚期狂熱 | 52% | ▰▰▰▰▰▱▱▱▱▱ | ◀ 最貼近 |
-| 2000/3 頂點 | 32% | ▰▰▰▱▱▱▱▱▱▱ |  |
+| 1998 LTCM 衝擊 | 25% | ▰▰▱▱▱▱▱▱▱▱ |  |
+| 1999 晚期狂熱 | 50% | ▰▰▰▰▰▱▱▱▱▱ | ◀ 最貼近 |
+| 2000/3 頂點 | 40% | ▰▰▰▰▱▱▱▱▱▱ |  |
 | 2021/12 Meme 頂 | 40% | ▰▰▰▰▱▱▱▱▱▱ |  |
 
 上方為格式範例。最高相似度的列在「標記」欄填「◀ 最貼近」，其餘留白。相似度數值一律來自 `## 歷史泡沫週期對比` 的 checklist v2 計算（命中數 ÷ 特徵數，取最近 5%），不得自由評估。
@@ -584,9 +584,11 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 
 上方為格式範例，方向符號用 ▲（上）/ ▼（下）/ 持平。
 
-**方向門檻（持平判定）：** 變動絕對值小於門檻即標「持平」，否則依正負標 ▲ / ▼。S&P 500 與 WTI：|chg| < 0.5%；10Y：|Δ| < 2 bps。S&P 500 的 chg 取自 `sp500_trend.chg_pct`、10Y 取自 `decomposition.d_dgs10_bps`、WTI 取自 DCOILWTICO 的 prior delta。
+**方向門檻（持平判定）：** 變動絕對值小於門檻即標「持平」，否則依正負標 ▲ / ▼。S&P 500 與 WTI：|chg| < 0.5%；10Y：|Δ| < 2 bps。S&P 500 的 chg 取自 `sp500_trend.chg_pct`、10Y 取自 `decomposition.d_dgs10_bps`、WTI 取自 `DCOILWTICO` 的 `chg_pct`（script 由 `latest`/`prior` 算出，單位 %；script 另有 `delta_abs` 為美元變動，方向門檻請勿誤用）。
 
 **基準日填值：** 無前次資料時，§3「vs 前次」欄三列一律填 —，五段解讀中凡需與前次比較的方向描述改述為「基準日，無前次可比」，且不觸發任何方向性 ⚠。
+
+**前次存在但方向不可得：** 若有有效前次基準、但本次 script 未供方向 delta（macro-fetch branch (c) 整支未印出 JSON，或 `sp500_trend` / `DCOILWTICO` 回報 `fetch_failed`），則受影響指標的「vs 前次」欄填 —、五段解讀對該指標述為「本次方向不可用——無腳本日序」、不觸發任何方向性 ⚠；`score.json.regime` 填 `不可判`（不得猜 穩定共存／同向偏高／分歧，也不得標 基準日——前次存在、§1 Δ 欄仍照常以前次分數計算填入）。
 
 **方向一致性要求：** 下方五段解讀對每個指標（股市 / WTI 原油 / 10Y）的方向描述，必須與本 §3 表格「vs 前次」欄的方向符號（▲ / ▼ / 持平）一致。若內文與表格數據衝突（例如表格標 10Y 持平、內文卻稱債同步上行），一律以表格數據為準，並修正內文措辭。
 
@@ -598,7 +600,7 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 - **出現分歧**：三者方向不一致（▲ / ▼ 混合）——標出哪一項在反向重新定價。
 - **穩定共存**：其餘情形（多為小幅／持平、未見拉伸）。
 
-方向取自本 §3 表「vs 前次」欄（script 供給：S&P 取 `sp500_trend`、10Y 取 `decomposition.d_dgs10_bps`、WTI 取 DCOILWTICO prior delta）。刻意不對 WTI / 10Y 設絕對「偏高」水位（與「不 hardcode 觸發線、評機制不評水位」一致），「偏高」僅以 S&P 趨勢偏離度量；`+10%` 為 calibration knob。本次判定出的格局須寫入本次 `score.json.regime`（值為 穩定共存 / 同向偏高 / 分歧；基準日無方向可判時填 基準日）。
+方向取自本 §3 表「vs 前次」欄（script 供給：S&P 取 `sp500_trend`、10Y 取 `decomposition.d_dgs10_bps`、WTI 取 `DCOILWTICO.chg_pct`）。刻意不對 WTI / 10Y 設絕對「偏高」水位（與「不 hardcode 觸發線、評機制不評水位」一致），「偏高」僅以 S&P 趨勢偏離度量；`+10%` 為 calibration knob。本次判定出的格局須寫入本次 `score.json.regime`（值為 穩定共存 / 同向偏高 / 分歧；基準日無方向可判時填 基準日；前次存在但本次方向不可得時填 不可判）。
 
 **三者狀態**：{穩定共存 / 同向偏高（不穩定）/ 出現分歧（[哪項在重新定價]）}，下接三條 bullet 分列各指標本次值與相對前次方向：
 
