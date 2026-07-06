@@ -133,6 +133,16 @@ def series_block(sid, unit):
         if unit == "usd" and prior[1]:
             res["chg_pct"] = round(delta / prior[1] * 100, 2)
         res["delta_abs"] = round(delta, 3)
+    elif prior and sid not in WIDE_WINDOW_SERIES:
+        # prior-run date and latest valid observation coincide (holiday /
+        # weekend gap): the weekly change is 0 by construction, not unknown
+        res["prior_date"], res["prior"] = prior[0], prior[1]
+        res["no_new_obs"] = True
+        if unit == "pct":
+            res["delta_bps"] = 0.0
+        if unit == "usd":
+            res["chg_pct"] = 0.0
+        res["delta_abs"] = 0.0
     if sid in YOY_SERIES:
         base_target = (datetime.strptime(latest[0], "%Y-%m-%d")
                        - timedelta(days=365)).strftime("%Y-%m-%d")
@@ -174,6 +184,10 @@ def sp500_trend():
     if prior and prior[0] != latest_date:
         res["prior_spot_date"], res["prior_spot"] = prior[0], round(prior[1], 2)
         res["chg_pct"] = round((latest - prior[1]) / prior[1] * 100, 2)
+    elif prior:
+        res["prior_spot_date"], res["prior_spot"] = prior[0], round(prior[1], 2)
+        res["chg_pct"] = 0.0
+        res["no_new_obs"] = True
     return res
 
 def main():
@@ -200,13 +214,22 @@ def main():
     if d["T10YIE"] is None and d["DGS10"] is not None and d["DFII10"] is not None:
         d["T10YIE"] = round(d["DGS10"] - d["DFII10"], 1)
     if all(d[k] is not None for k in ("DGS10", "DFII10")):
+        t = d.get("T10YIE")
+        if not d["DGS10"] and not d["DFII10"] and not t:
+            driver = "none"
+        elif abs(t or 0) > abs(d["DFII10"] or 0):
+            driver = "breakeven"
+        elif abs(d["DFII10"] or 0) > abs(t or 0):
+            driver = "real-rate"
+        else:
+            driver = "mixed"
+        note = "weekly change in bps; computed from daily history"
+        if any(out["series"].get(k, {}).get("no_new_obs")
+               for k in ("DGS10", "DFII10", "T10YIE")):
+            note += "; no new observations since the prior run (delta 0 by construction)"
         out["decomposition"] = {
             "d_dgs10_bps": d["DGS10"], "d_dfii10_bps": d["DFII10"],
-            "d_t10yie_bps": d.get("T10YIE"),
-            "driver": ("breakeven" if abs(d.get("T10YIE") or 0) > abs(d["DFII10"] or 0)
-                       else "real-rate" if abs(d["DFII10"] or 0) > abs(d.get("T10YIE") or 0)
-                       else "mixed"),
-            "note": "weekly change in bps; computed from daily history",
+            "d_t10yie_bps": t, "driver": driver, "note": note,
         }
     else:
         out["decomposition"] = {"status": "unavailable_no_daily_history"}

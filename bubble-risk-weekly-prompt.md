@@ -96,6 +96,7 @@ python3 scripts/fetch_macro.py <prior-run-date | none>
 - Parse that JSON. Use each series' `latest` / `latest_date` and, for the 10Y rate series, `delta_bps` and the `decomposition` object directly — do not re-fetch these by WebSearch when the script returned `status: ok` / `derived`.
 - From the `sp500_trend` block use `latest`, `ma200`, `dev200_pct`, and (if present) `ma52w` / `dev52w_pct` for the S&P 500 price-trend deviation input (估值溢價 scoring + §2 anchor); also use `prior_spot` / `prior_spot_date` / `chg_pct` (when present) as the S&P 500 「本次 / vs 前次」 values in the §3 三角訊號 table — this is script-sourced and deterministic, so do not re-derive the S&P 500 prior level from Yahoo history. If `sp500_trend.status == fetch_failed`, report the S&P 500 spot level only and state `本週趨勢偏離不可用——無日序資料`; never fabricate a deviation. Use `BOGZ1FL153064486Q` `latest` / `latest_date` as the household equity allocation level (散戶情緒); it is quarterly, so most weekly runs reuse the latest quarter — cite its `latest_date` quarter and do not compute a weekly Δ. Use `CPIAUCSL` `yoy_pct` / `latest_date` as the realized CPI YoY input (monthly stock-of-state — most runs carry the latest print forward; cite its data month, no weekly Δ) and `T5YIFR` `latest` / `delta_bps` as the 5y5y forward inflation-expectations input; both feed the D5 / §3 Fed-constraint read.
 - For any series with `status: fetch_failed`, fall back to WebSearch for the current spot value (mark `✓ SEARCH-VERIFIED`, spot-only / no daily history). If `decomposition.status == "unavailable_no_daily_history"`, report the spot levels and state `本週 Δ 分解不可用——無日序資料`; never fabricate a Δ.
+- Any series block or `sp500_trend` may carry `no_new_obs: true` — the prior-run date and the latest valid observation are the same day (e.g. a Monday run after a holiday weekend). That is a successful Δ = 0 result, not a missing delta: use the emitted zero deltas normally, follow the §3 `no_new_obs` rule (持平, regime computed normally), and do not treat the series as degraded or report `本週 Δ 分解不可用`.
 - Status mapping for the Coverage table: script `ok` → `✓ API`; `derived` → `derived`; `fetch_failed` then WebSearch success → `✓ SEARCH-VERIFIED`; all paths fail → `⛔ FETCH FAILED`.
 - **Macro-fetch decision branch (single source of truth for script outcomes):** (a) script runs and returns JSON → use each series' values per the bullets above; (b) JSON returns with some or all series `status: fetch_failed` (the block was still printed — including the case where every series failed, e.g. `FRED_API_KEY` missing/invalid) → WebSearch **only those** failed series for spot values; (c) the script emits no `===MACRO_JSON_START===` / `===MACRO_JSON_END===` block at all — `python3` unavailable, the script is absent from disk *and* the raw-GitHub fallback fetch also fails, or a non-zero exit with no block — then WebSearch the current spot value for **all** macro series (mark each `✓ SEARCH-VERIFIED` spot-only, or `⛔ FETCH FAILED` where even WebSearch yields nothing), state `本週 Δ 分解不可用——腳本未能執行` for the 10Y decomposition, and proceed to scoring. The macro fallback is always per-series WebSearch, never abort-the-report and never a blanket re-fetch of series the script already returned `ok` / `derived`.
 
@@ -196,11 +197,11 @@ All series below are fetched by `scripts/fetch_macro.py` (see "Macro-data fetch"
 
 **Mandatory section order — emit exactly these sections in this exact order. Do not merge, reorder, drop, or rename:**
 
-1. Report title (`# <YYYY-MM-DD> 市場泡沫風險評估報告` plus a one-line meta with 報告日期、執行日、ISO 週次、前次基準/基準日)
+1. Report title (`# <YYYY-MM-DD> 市場泡沫風險評估報告` plus a one-line meta with 報告日期、執行日、ISO 週次、前次基準/基準日, then a one-line bold `**總評**` — 總分【tier】（Δ）、扳機狀態、最貼近錨點；四值全部取自 `## 綜合分數`、§1 加權總分列、§3 結論、§2「◀ 最貼近」列的計算結果，不得在此另行評估)
 2. `## §1 六維度風險條圖` — chart only (see 視覺化 spec below for exact columns)
 3. `## §2 歷史錨點相似度` — chart only
 4. `## §3 三角訊號` — chart plus a short interpretation paragraph
-5. `## 六維度評分` — separate rationale table or per-dimension subsections, with sources and dates (not folded into §1)
+5. `## 六維度評分` — per-dimension subsections in the fixed bullet structure defined under `## 六維度評分` below, with sources and dates (not folded into §1)
 6. `## 綜合分數` — explicit weight × score table that sums to total + risk tier
 7. `## 歷史泡沫週期對比` — narrative interpretation referencing §2 (not just the §2 table again)
 8. `## 機構情緒對照`
@@ -215,11 +216,15 @@ For every mandatory item above: if current evidence is unavailable or a source f
 
 **Exact wording lock:** Use `本次` exactly in the mandatory headings and comparison labels shown in this prompt. Do not substitute `本期`, `本輪`, or other synonyms in section names, table columns, meta labels, `## 本次新增訊號`, or `## 本次分數存檔`.
 
+**單位換算規則（大額 balance-sheet 序列）：** WALCL（單位：百萬美元）、ECBASSETSW（百萬歐元）、JPNASSETS（億日圓）在報告任何位置引用時一律換算為兆（T）表示——如 WALCL 6,724,564 → $6.72T、ECBASSETSW 6,117,260 → €6.12T、JPNASSETS 6,395,509 → ¥639.55T。數據附錄數值欄可在換算值後以括號附原始值與原單位；禁止輸出未換算的原始大數當主要數值，或自創複合單位（如 ¥6,395.5T×億）。
+
 **Report skeleton lock — before drafting, instantiate this skeleton and fill it in. Keep every heading below exactly as written, in this order. Do not print extra top-level or second-level sections, and do not merge adjacent sections:**
 
 ````markdown
 # <YYYY-MM-DD> 市場泡沫風險評估報告
 > 報告日期：<YYYY-MM-DD>；執行日：<YYYY-MM-DD Asia/Taipei>；ISO 週次：<YYYY-Www>；前次基準：<report-YYYY-MM-DD（X天前） or 基準日>
+
+**總評**：總分 <X>【<tier>】（Δ <±N 或 —>）；扳機狀態：<未擊發／初啟／已擊發>；最貼近錨點：<錨點名>（<XX>%）。
 
 ## §1 六維度風險條圖
 | 維度 | 條圖 | 本次 | 前次 | Δ |
@@ -260,6 +265,8 @@ For every mandatory item above: if current evidence is unavailable or a source f
 **Internal self-check before final output (do not print this checklist):**
 
 - The report contains exactly the 12 mandatory items above, with no renamed, missing, duplicated, or merged sections.
+- `**總評**` 行存在且四值一致：總分／tier 同 `## 綜合分數` 與 score.json；Δ 同 §1 加權總分列；扳機狀態同 §3 結論首句；最貼近錨點同 §2「◀ 最貼近」列。
+- `## 六維度評分` 每個維度都是固定 bullet 結構（每個計分輸入一條 bullet ＋ 粗體 `**結論**` 行收尾），沒有任何維度被寫成單一長段落。
 - Only §1 / §2 / §3 headings contain `§N`; no later section is renumbered as `§4`-`§11`.
 - All required `本次` wording remains exact; no mandatory heading, comparison label, table column, or archive section uses `本期` or another synonym.
 - §1 / §2 / §3 use only their required columns; rationale and sources are outside the visualization tables.
@@ -283,7 +290,13 @@ For every mandatory item above: if current evidence is unavailable or a source f
 
 ## 六維度評分
 
-For each dimension, give a score 0-100 and a one-sentence rationale citing specific data points with sources.
+For each dimension, give a score 0-100 with a rationale citing specific data points with sources. **Fixed per-dimension output structure（可讀性要求——禁止把一個維度寫成單一長段落）：**
+
+- 子標題：`### <N>. <維度名> — <本次分數>（weight <X>%，Δ <±N｜0｜—>）`
+- 每個計分輸入一條 bullet：`**<指標名>** <數值>（<資料日期>，<來源連結 / FRED series ID>）——<一句判讀>`。一條 bullet 只講一個訊號，關鍵數值加粗。
+- Confirmation-only 輸入（如 ECY、NAAIM、Cboe put/call、VIX / SKEW、margin-debt cross-ref）在判讀句尾標「（confirmation，不主計分）」。
+- 缺值輸入（`✗ NOT DISCLOSED` / `⛔ FETCH FAILED`）也各佔一條 bullet，寫明狀態與「不納入計分」。
+- 末行固定：`**結論**：<≤2 句——本次分數落在 rubric 哪個區間、相對前次升／降／持平的原因>`。D5 的側別標記（自滿側／扳機側／中性）依 D5 規格寫在此結論行。
 
 ### 1. 估值溢價 (weight 22%)
 
@@ -472,6 +485,8 @@ If 「全球槓桿擴散訊號」triggered this week, list all approving markets
 
 Raw data table — one row per concrete data point used in scoring, with columns: `指標 | 數值 | 來源（FRED series ID / URL）| 資料日期 | 抓取 timestamp`. This is separate from, and in addition to, the Coverage table (which carries one status row per `# Data sources` bullet); the raw-data table holds the actual values and the Coverage table holds the per-bullet retrieval status.
 
+SEARCH-VERIFIED traceability 記錄一律以表格呈現（不用長 bullet 清單），欄位：`項目 | search query | 結果 URL／來源 | 發布或資料日期 | 抓取 timestamp`。`✓ SEARCH-VERIFIED（0 件）` 列依 Zero-result screens 規則 URL／發布日期欄可填 `—`，「結果 URL／來源」欄改列檢查過的來源。欄位要求與 Fetch protocol 相同，只是排版由 bullet 改為表格。
+
 ## 本次分數存檔
 
 After all sections above, output a fenced JSON block (label `json`) for the next run to read. This schema stores the six dimension scores plus `total` / `tier` / `regime`. `regime` is a derived §3 格局 label (like `tier`) that is **not** re-derivable on the next run — recomputing the prior regime would need the prior period's directions and prior `dev200_pct`, which are not re-fetchable — so it is persisted deliberately. The no-extend rule still applies to raw series: this schema deliberately does not persist `DGS10` / `DFII10` / `T10YIE` or other raw values, which are re-fetched from FRED history every run (see the FRED history rule); do not add raw series to this schema. Schema must match exactly:
@@ -494,7 +509,11 @@ After all sections above, output a fenced JSON block (label `json`) for the next
 }
 ```
 
-Generate all report sections, including the 視覺化 section below, before invoking the archive write. Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub connector's file-write API**, using whatever write mechanism the connector provides. The routine must complete the write autonomously inside the same session — it is the routine's job, not the user's.
+Generate all report sections, including the 視覺化 section below, before invoking the archive write.
+
+**Pre-archive validation gate (deterministic, required):** before the archive write, save the complete report markdown to a local temp file (a local validation copy is not an archive write and is permitted), then run `python3 scripts/validate_report.py <temp-file>` (from the prompt repo's `scripts/`; if absent on disk, fetch it from raw.githubusercontent the same way as `fetch_macro.py`). Fix every reported failure and re-run until it exits 0; only then invoke the connector write. In dry-run mode, still run the validator and print its result. The validator enforces the locked skeleton (12 sections, exact headings and §1/§2/§3 columns), the exact final disclaimer line, the score-JSON schema / weighted-total arithmetic / tier mapping / date-weekday-ISO-week consistency, §1/§2 bar-chart-vs-score consistency, and the 總評 line — it complements the internal self-check, it does not replace it. If `python3` is unavailable *and* the script cannot be fetched, state that the validation gate could not run at the end of the report and proceed with extra care on the self-check.
+
+Then write this JSON to `moonape1226/bubble-risk-archive` **via the GitHub connector's file-write API**, using whatever write mechanism the connector provides. The routine must complete the write autonomously inside the same session — it is the routine's job, not the user's.
 
 **Required end-state (this is what matters, not the mechanism):** when the run finishes, `report-<YYYY-MM-DD>/score.json` and `report-<YYYY-MM-DD>/report.md` must both exist on the `main` branch of `moonape1226/bubble-risk-archive`, with no pull request left open and no review pending. If the connector reaches `main` by opening a branch and pull request that it then merges within the same session, that is fine — do not avoid the connector's native flow, but do not leave anything un-merged or waiting for a human.
 
@@ -590,6 +609,8 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 
 **前次存在但方向不可得：** 若有有效前次基準、但本次 script 未供方向 delta（macro-fetch branch (c) 整支未印出 JSON，或 `sp500_trend` / `DCOILWTICO` 回報 `fetch_failed`），則受影響指標的「vs 前次」欄填 —、五段解讀對該指標述為「本次方向不可用——無腳本日序」、不觸發任何方向性 ⚠；`score.json.regime` 填 `不可判`（不得猜 穩定共存／同向偏高／分歧，也不得標 基準日——前次存在、§1 Δ 欄仍照常以前次分數計算填入）。
 
+**前次存在、觀測未更新（`no_new_obs`）：** 若 script 對某指標回傳 `no_new_obs: true`（前次基準日與最新有效觀測同日——例如假日／週末後的週一運行，市場資料尚無新觀測），這是「Δ = 0（無新觀測）」的**成功結果**、不是方向不可得：該指標「vs 前次」欄標 持平 並註「無新觀測」；10Y 拆解照常輸出（受影響項 Δ 為 0 bps、判定填 無變動（無新觀測），不得寫 `本週 Δ 分解不可用`）；格局照「格局判定規則」正常計算並持久化（不得填 不可判）。僅當 script 未執行或該序列 `fetch_failed` 時才適用上一段的 不可判 處理。
+
 **方向一致性要求：** 下方五段解讀對每個指標（股市 / WTI 原油 / 10Y）的方向描述，必須與本 §3 表格「vs 前次」欄的方向符號（▲ / ▼ / 持平）一致。若內文與表格數據衝突（例如表格標 10Y 持平、內文卻稱債同步上行），一律以表格數據為準，並修正內文措辭。
 
 表格下方以**分段結構**呈現解讀（用 Markdown 粗體小標 + 條列，非表格、非 code fence、不得使用框線字元）。粗體小標只是標籤，不要用 `##` / `###` 標題，以免與 12-section 結構衝突。依序輸出下列五段：
@@ -614,7 +635,7 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 
 - ΔDFII10 實質殖利率週變動：[±X bps、方向]
 - ΔT10YIE 損益平衡通膨週變動：[±X bps、方向]
-- 判定：{real-rate-driven / breakeven-driven / mixed}（依 ΔDFII10 與 ΔT10YIE 何者主導）
+- 判定：{real-rate-driven / breakeven-driven / mixed / 無變動（無新觀測）}（依 ΔDFII10 與 ΔT10YIE 何者主導；script `decomposition.driver == "none"` 時填 無變動（無新觀測））
 
 **扳機鏈：油 → 通膨預期 → Fed 受限 → refinancing 成本**：描述此鏈當前是否在啟動、Fed put 可得性如何變化（可引用 FOMC 對能源通膨的立場、鷹派異議票數等）。本段必須引用 script 供給的 CPI YoY（`CPIAUCSL` `yoy_pct`，標註資料月份）與 T5YIFR 5y5y forward 水位／週 Δ 作為「通膨預期 → Fed 受限」環節的數據基礎；FedWatch 隱含路徑有抓到時一併引用。CPI 不得只憑新聞搜尋偶得的數字。
 
