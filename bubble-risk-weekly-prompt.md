@@ -11,6 +11,8 @@ You are producing a twice-weekly market bubble risk report in Traditional Chines
 | Flow direction trigger | net inflow→outflow flip | 資金流出反轉、流入轉流出 |
 | AI infrastructure financing leverage | AI infrastructure debt financing / vendor-financing loops | AI 私募信貸、data-center debt stress、vendor financing |
 | §3 / D5 trigger-state label | 扳機狀態：未擊發 / 初啟 / 已擊發 | 觸發狀態、點火、trigger fired、扳機已扣 |
+| Treasury-market NBFI leverage signal (D6 / §3 / `## 本次新增訊號`) | 美債基差交易槓桿（Treasury basis-trade leverage） | 基差套利槓桿、對沖基金美債槓桿、basis trade exposure |
+| §3 槓桿鏈 dysfunction event | 國債市場失序（Treasury market dysfunction） | 美債市場功能失常、Treasury fire sale、債市失靈 |
 
 # Task
 
@@ -110,7 +112,7 @@ Best-effort items — those explicitly tagged in `# Data sources` (AI token volu
 
 | | 項目 |
 |---|---|
-| **Best-effort**（可 `✗ NOT DISCLOSED`） | analyst TP upgrade decomposition；AI token volume growth；hyperscaler 客戶集中度；OpenAI / Anthropic 營收；AI compute 供需／過剩；PBoC aggregate financing；非美槓桿核准（KRX / TWSE / JPX / ESMA）；upcoming AI IPO timing；AI infrastructure debt financing / vendor-financing loops；private-credit / 非銀基金贖回壓力；BofA / JPM 機構調查（月頻）；社交情緒代理（Reddit / X）；NAAIM Exposure Index（週頻）；Cboe equity put/call ratio；CME FedWatch 隱含路徑 |
+| **Best-effort**（可 `✗ NOT DISCLOSED`） | analyst TP upgrade decomposition；AI token volume growth；hyperscaler 客戶集中度；OpenAI / Anthropic 營收；AI compute 供需／過剩；PBoC aggregate financing；非美槓桿核准（KRX / TWSE / JPX / ESMA）；upcoming AI IPO timing；AI infrastructure debt financing / vendor-financing loops；private-credit / 非銀基金贖回壓力；BofA / JPM 機構調查（月頻）；社交情緒代理（Reddit / X）；NAAIM Exposure Index（週頻）；Cboe equity put/call ratio；CME FedWatch 隱含路徑；美債基差交易槓桿（CFTC 淨空倉 / MOVE / repo stress） |
 | **Required**（須 `✓ API/DIRECT/SEARCH-VERIFIED` 或 `⛔ FETCH FAILED`，不得 `✗`） | 其餘全部——含 FRED 全序列（DGS10 / DFII10 / T10YIE / BAMLH0A0HYM2 HY OAS / BAMLC0A0CM IG OAS / DFEDTARU·DFEDTARL / WALCL / DCOILWTICO / CPIAUCSL CPI YoY / T5YIFR）、S&P 500 P/E・CAPE、Mag 7 P/E、RSP/SPY 廣度、Top-10 集中度、A/D、CNN F&G、Margin Debt、AAII、0DTE / options volume、美國槓桿 ETF AUM、VIX / SKEW、IPO heat、+AI rename / SPAC 掃描、microcap moonshots、insider Form 4、ECB・BOJ、S&P 500 趨勢偏離（200-DMA/52週MA，由 SP500 計算）、家庭持股佔金融資產比（BOGZ1FL153064486Q） |
 
 **Timeout policy:** If any single direct fetch exceeds ~90 seconds, try the source's API or WebSearch path if available. If no path returns a current usable value, mark ⛔ FETCH FAILED and move on. Never block report generation on one stuck source.
@@ -192,6 +194,7 @@ All series below are fetched by `scripts/fetch_macro.py` (see "Macro-data fetch"
 - Cross-asset derivatives / correlation checks: VIX term structure, Cboe SKEW, and rolling stock-bond correlation
 - Cross-reference only: FINRA margin debt or FRED series BOGZ1FL073164003.Q, including the margin debt / equity market cap ratio from Retail Sentiment as a confirmation check only (primary margin debt scoring remains under retail sentiment; do not double-count it here)
 - **AI infrastructure debt financing / vendor-financing loops [primary: SEARCH]** (best-effort): scan the past 30 days for disclosed debt financing, private credit facilities, ABS / asset-backed facilities, delayed-draw term loans, convertible debt, or sale-leaseback financing tied to AI GPU clusters, neoclouds, or data centers (CoreWeave, Crusoe, Lambda, Nebius, Applied Digital, xAI / OpenAI infrastructure vehicles, Stargate-related entities). Record borrower, amount, date, financing type, collateral / customer-contract backing if disclosed, pricing / rating if disclosed, use of proceeds, and source URL. Separately track Nvidia / hyperscaler circular-financing exposure: disclosed equity investments, customer purchase commitments, capacity backstops, vendor-financing-like arrangements, or guarantees where the recipient is also a buyer of GPUs / compute. Quantify only named disclosed deal amounts; do not invent a circular-financing ratio. If no new disclosure is found in the past 30 days, mark ✗ NOT DISCLOSED for the weekly event signal and optionally cite the latest outstanding disclosed facilities as background, not as 本次新增訊號.
+- **美債基差交易槓桿（Treasury basis-trade leverage）[primary: SEARCH]** (best-effort): weekly proxy scan for NBFI / hedge-fund leverage in the sovereign bond market — the BIS AER 2026 Ch II amplification channel. Evidence to collect, any subset that is current: (a) CFTC Traders in Financial Futures weekly report — leveraged funds aggregate net short in Treasury futures, level and trend vs recent weeks (cftc.gov weekly release; Reuters / Bloomberg / financial-press summaries acceptable); (b) MOVE index level and weekly change (bond-volatility confirmation); (c) repo / funding stress — SOFR spikes vs the Fed's administered rates, OFR Short-Term Funding Monitor readings, dealer balance-sheet constraint commentary, or disclosed basis-trade / swap-spread unwind events. Record value, data date, and source URL per item. Structural background anchors (cite as background, do not re-fetch weekly): BIS AER 2026 Ch II — NBFI share of advanced-economy government debt 44% → 53% over 2021–25; ~70% of hedge-fund bilateral USD repo at zero haircut; April 2025 swap-spread unwind as the near-miss rehearsal. If no current value or qualifying disclosure is found this week, mark ✗ NOT DISCLOSED.
 
 # Output structure
 
@@ -238,7 +241,7 @@ For every mandatory item above: if current evidence is unavailable or a source f
 **三者狀態**：<穩定共存 / 同向偏高 / 分歧；下接三條 bullet>
 **格局轉變**：<一句>
 **10Y 成因拆解**：<ΔDFII10、ΔT10YIE（bps）、判定>
-**扳機鏈**：<油 → 通膨預期 → Fed 受限 → refinancing>
+**扳機鏈**：<A 通膨鏈：油 → 通膨預期 → Fed 受限 → refinancing；B 槓桿鏈：衝擊 → NBFI 去槓桿 → margin spiral → 國債市場失序>
 **結論**：<扳機狀態：未擊發/初啟/已擊發 ＋ 歷史意義；已擊發或同向偏高加 ⚠>
 （以上五段一律用粗體小標、非 `##` / `###` 標題，詳見 §3 規格）
 
@@ -380,7 +383,7 @@ Score based on:
 - Global liquidity cross-check: ECB / BOJ balance sheets and PBoC aggregate financing or liquidity operations. Use as confirmation, not a separate seventh dimension.
 - **私募信貸贖回壓力 (best-effort, event-driven)**: broad private-credit / non-bank fund liquidity stress as a low-frequency financing trigger that public mark-to-market spreads (HY / IG OAS) may under-detect early. Default state is ✗ NOT DISCLOSED — most weeks carry no new disclosure. Score it into dimension 5 only on an actual gate proration / breach, a clearly worsening multi-fund redemption-request trend, or a net inflow→outflow flip across more than one large non-traded BDC / interval fund; a single fund's quarter-specific outflow or the mere presence of a 5% cap is not sufficient. When it does fire, treat it as confirmation that financing-cycle tightening is reaching non-bank credit, and feed it into the §3 financing-trigger read. This is general macro / non-bank credit liquidity; keep it distinct from 結構性槓桿's AI-infrastructure private-credit item and do not double-count.
 - IG OAS, WALCL / Fed balance sheet, and ECB / BOJ / PBoC liquidity must each appear in the dimension-5 rationale with a current value, or appear in the Coverage table with the correct failure status: IG OAS / WALCL / ECB / BOJ are required → `⛔ FETCH FAILED` on failure, never `✗ NOT DISCLOSED`; only PBoC (best-effort) may be `✗ NOT DISCLOSED`. If any required monetary input is unavailable, the dimension-5 score rationale must explicitly note the missing input instead of scoring as if it were observed.
-- **三角交叉訊號**: Compare current state of {S&P 500, WTI oil, 10Y yield}. Flag if all three are at multi-month highs simultaneously, which is historically unstable. In the interpretation, decompose the 10Y change: WTI rising with a breakeven-driven 10Y rise supports the oil → inflation expectations → Fed-constrained → refinancing-cost transmission; real-rate-driven 10Y rises still pressure valuation and refinancing, but imply a different policy-response path unless credit spreads or refinancing stress are also widening. Do not hardcode a single oil-price scenario as the trigger line; score the transmission mechanism itself.
+- **三角交叉訊號**: Compare current state of {S&P 500, WTI oil, 10Y yield}. Flag if all three are at multi-month highs simultaneously, which is historically unstable. In the interpretation, decompose the 10Y change: WTI rising with a breakeven-driven 10Y rise supports the oil → inflation expectations → Fed-constrained → refinancing-cost transmission; real-rate-driven 10Y rises still pressure valuation and refinancing, but imply a different policy-response path unless credit spreads or refinancing stress are also widening. A real-rate-driven 10Y spike of unusual size accompanied by basis-trade / swap-spread unwind evidence is the §3 槓桿鏈 (chain B) signature, not the inflation chain — read it against the D6 美債基差交易槓桿 signal instead of forcing it into the oil → inflation narrative. Do not hardcode a single oil-price scenario as the trigger line; score the transmission mechanism itself.
 
 **Rubric anchor points**（雙向：信用自滿與扳機擊發都推高分數）：
 
@@ -407,14 +410,15 @@ Score based on:
 - Cross-reference margin debt / equity market cap ratio from 散戶情緒 as confirmation only; do not double-count it in 結構性槓桿 scoring
 - AI infrastructure debt financing / vendor-financing loops: disclosed AI data-center / GPU-backed debt facilities, private credit / ABS issuance, and Nvidia / hyperscaler customer-financing ties. Treat this as structural leverage inside the AI capex trade, not as general macro credit conditions; do not create a seventh dimension or change the 15% weight. Reuse the 10Y real-vs-breakeven decomposition from 貨幣與信貸 and already-disclosed facilities only as a refinancing-sensitivity cross-reference; do not add a new weekly fetch requirement here. Add structural-leverage risk only when sources show debt-term deterioration, refinancing stress, collateral impairment, or customer-contract weakness; otherwise keep it as background and do not double-count. Broad private-credit / non-bank fund redemption-gate liquidity stress is scored under 貨幣與信貸 (dimension 5), not here; this item is limited to AI-infrastructure / data-center financing leverage.
 - Cross-reference AI compute overcapacity signals from 估值溢價 as confirmation only: capacity glut / utilization weakness is the trigger mechanism that can impair GPU collateral values, customer-contract backing, and circular vendor-financing loops. Primary scoring for the supply/demand gap remains under AI fundamentals / valuation; do not double-count it here.
+- 美債基差交易槓桿 (best-effort): leveraged-fund Treasury futures net shorts (CFTC), MOVE, and repo-stress signals from the corresponding Data sources bullet. This is institutional structural leverage in the sovereign bond market — the amplification channel BIS AER 2026 Ch II identifies — tracked beside the retail / derivatives leverage inputs above, not as a seventh dimension and not a weight change. At normal readings treat it as confirmation / background only. Add structural-leverage risk only on active build-up or unwind evidence: a multi-week rise in leveraged-fund net shorts to reported record / cycle-extreme levels, a MOVE spike paired with basis-trade or swap-spread unwind reporting, or repo funding stress. A disorderly unwind (國債市場失序 event) additionally feeds the §3 trigger-state read (槓桿鏈): score the leverage evidence here, but leave trigger-state labelling to §3. Missing data (✗ NOT DISCLOSED) must not move the D6 score. Keep it distinct from D5's 私募信貸贖回壓力 (fund-liquidity trigger) — this item is market-leverage in sovereign bonds, not non-bank credit-fund redemptions; do not double-count.
 
 **Rubric anchor points:**
 
 - 0-20: Leveraged ETF AUM near 12-month lows; 0DTE share < 30%; no global approvals; no recent AI infrastructure debt disclosure
 - 21-40: AUM rising moderately; 0DTE share 30-45%; isolated single-market approvals; AI debt disclosures are small / refinancing-only
 - 41-60: AUM growing steadily; 0DTE share 45-55%; 1 market approval in the past 4 weeks; AI infrastructure debt is present but matched to disclosed customer contracts with stable terms
-- 61-80: AUM accelerating; 0DTE share 55-65%; 2+ market approvals in the past 4 weeks; new large AI infrastructure debt / private credit / ABS facilities or visible Nvidia / hyperscaler customer-financing loops expand this month
-- 81-100: AUM rising vertically; 0DTE share persistently > 65%; 「全球槓桿擴散訊號」triggered this week; or AI infrastructure financing shows multiple large, collateral-light, circular, or covenant-stretched deals in the same month
+- 61-80: AUM accelerating; 0DTE share 55-65%; 2+ market approvals in the past 4 weeks; new large AI infrastructure debt / private credit / ABS facilities or visible Nvidia / hyperscaler customer-financing loops expand this month; or leveraged-fund Treasury net shorts in a multi-week build-up toward reported record / cycle-extreme levels
+- 81-100: AUM rising vertically; 0DTE share persistently > 65%; 「全球槓桿擴散訊號」triggered this week; AI infrastructure financing shows multiple large, collateral-light, circular, or covenant-stretched deals in the same month; or a disorderly basis-trade / swap-spread unwind（國債市場失序 event）this week
 
 **Special rule:**
 
@@ -637,15 +641,18 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 - ΔT10YIE 損益平衡通膨週變動：[±X bps、方向]
 - 判定：{real-rate-driven / breakeven-driven / mixed / 無變動（無新觀測）}（依 ΔDFII10 與 ΔT10YIE 何者主導；script `decomposition.driver == "none"` 時填 無變動（無新觀測））
 
-**扳機鏈：油 → 通膨預期 → Fed 受限 → refinancing 成本**：描述此鏈當前是否在啟動、Fed put 可得性如何變化（可引用 FOMC 對能源通膨的立場、鷹派異議票數等）。本段必須引用 script 供給的 CPI YoY（`CPIAUCSL` `yoy_pct`，標註資料月份）與 T5YIFR 5y5y forward 水位／週 Δ 作為「通膨預期 → Fed 受限」環節的數據基礎；FedWatch 隱含路徑有抓到時一併引用。CPI 不得只憑新聞搜尋偶得的數字。
+**扳機鏈**：本段分 A / B 兩條傳導鏈，各一小段描述當前是否在啟動：
+
+- **A 通膨鏈：油 → 通膨預期 → Fed 受限 → refinancing 成本**——描述此鏈當前是否在啟動、Fed put 可得性如何變化（可引用 FOMC 對能源通膨的立場、鷹派異議票數等）。必須引用 script 供給的 CPI YoY（`CPIAUCSL` `yoy_pct`，標註資料月份）與 T5YIFR 5y5y forward 水位／週 Δ 作為「通膨預期 → Fed 受限」環節的數據基礎；FedWatch 隱含路徑有抓到時一併引用。CPI 不得只憑新聞搜尋偶得的數字。
+- **B 槓桿鏈：衝擊 → NBFI 去槓桿 → margin spiral → 國債市場失序**（BIS AER 2026 Ch II 傳導鏈；2025-04 swap-spread unwind 為原型）——以 D6 的美債基差交易槓桿訊號（CFTC 槓桿基金淨空倉、MOVE、repo stress）判讀積累與釋放：淨空倉高位＝乾柴，MOVE 急升併同基差／swap-spread 平倉報導＝點火。real-rate 主導且幅度異常的 10Y 上行（見 10Y 成因拆解）併同槓桿平倉證據時，歸此鏈啟動、不套進通膨鏈敘事。本鏈證據為 best-effort：無當週資料時述為「本週無基差交易槓桿新證據」，不得杜撰。
 
 **結論**：本段第一句固定以「扳機狀態：未擊發／初啟／已擊發」開頭（pinned terms，見 terminology lock）。判定規則（決定性，由重到輕依序檢查，取第一個成立者）：
 
-- **已擊發**＝任一成立：私募信貸 gate proration / breach；多基金 net inflow→outflow flip；HY OAS 週 Δ ≥ +50 bps；具名再融資壓力或信用事件披露。
-- **初啟**＝未達已擊發，但任一成立：breakeven 主導的 10Y 上行且 WTI 同步上行；HY OAS 連續兩次運行走闊；D5 rationale 本次標「扳機側」。
+- **已擊發**＝任一成立：私募信貸 gate proration / breach；多基金 net inflow→outflow flip；HY OAS 週 Δ ≥ +50 bps；具名再融資壓力或信用事件披露；具名基差交易／swap-spread 失序平倉或國債市場失序事件披露（margin spiral、dealer 中介受限、fire-sale）。
+- **初啟**＝未達已擊發，但任一成立：breakeven 主導的 10Y 上行且 WTI 同步上行；HY OAS 連續兩次運行走闊；D5 rationale 本次標「扳機側」；槓桿鏈積累證據——CFTC 槓桿基金美債期貨淨空倉處於報導的紀錄／循環極端，且 MOVE 本週明顯上行。
 - **未擊發**＝其餘。基準日無前次可比時，只用無需前次的判據（gate / breach、具名披露），其餘記不成立。
 
-標籤後接三者配置的歷史意義（參照 HY OAS、信用利差、私募信貸贖回壓力、再融資壓力）。若扳機狀態＝已擊發、或三者同向偏高，在本段標題前加 ⚠；其餘不加。此標籤是 §2 checklist 與 D5 的共用輸入，但**不**寫入 score.json（schema 不變；穩定數期後再評估是否如 `regime` 持久化）。
+標籤後接三者配置的歷史意義（參照 HY OAS、信用利差、私募信貸贖回壓力、再融資壓力、美債基差交易槓桿）。若扳機狀態＝已擊發、或三者同向偏高，在本段標題前加 ⚠；其餘不加。此標籤是 §2 checklist 與 D5 的共用輸入，但**不**寫入 score.json（schema 不變；穩定數期後再評估是否如 `regime` 持久化）。
 
 Use §3 as a cross-dimensional interpretation only: valuation + leverage = crash potential energy; financing tightening = timing trigger; alignment of all three is the high-risk configuration. Do not reweight the six dimensions, change their independent scores, or double-count inputs for this guide.
 
