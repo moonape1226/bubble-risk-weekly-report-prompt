@@ -303,8 +303,13 @@ def move_index():
     return res
 
 def ofr_repo():
-    """OFR Short-term Funding Monitor: tri-party repo outstanding volume."""
-    mnemonic = "REPO-TRI_TV_TOT-P"
+    """OFR Short-term Funding Monitor: tri-party repo volume.
+
+    TRIV1 = excluding Federal Reserve transactions: keeps the private-funding
+    volume clean of ON RRP / SRF footprints, which are tracked separately
+    (RPONTTLD) - the include-Fed variant is REPO-TRI_TV_TOT-P.
+    """
+    mnemonic = "REPO-TRIV1_TV_TOT-P"
     url = f"https://data.financialresearch.gov/v1/series/full?mnemonic={mnemonic}"
     try:
         agg = json.loads(_get(url, timeout=30))[mnemonic]["timeseries"]["aggregation"]
