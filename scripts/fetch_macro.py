@@ -28,7 +28,7 @@ FRED_SERIES = {
     "BOGZ1FL153064486Q": "level",
     "T5YIFR": "pct", "CPIAUCSL": "level",
     "THREEFYTP10": "pct", "SOFR": "pct", "SOFR99": "pct", "IORB": "pct",
-    "RPONTSYD": "usd_bn", "LNFACBW027SBOG": "usd_bn",
+    "RPONTTLD": "usd_bn", "LNFACBW027SBOG": "usd_bn",
 }
 
 # Low-frequency series need a wider window: quarterly prints are often
@@ -36,6 +36,15 @@ FRED_SERIES = {
 QUARTERLY_SERIES = {"BOGZ1FL153064486Q"}
 YOY_SERIES = {"CPIAUCSL"}
 WIDE_WINDOW_SERIES = QUARTERLY_SERIES | YOY_SERIES
+
+# Published with a ~1-week lag: the latest observation usually predates the
+# prior-run date, so a pick-vs-PRIOR delta degenerates to no_new_obs / 0.
+# Compute the delta inside the series' own timeline instead (latest vs ~7d
+# earlier observation).
+LAGGED_TRAILING_WEEK = {"THREEFYTP10"}
+
+# obs lists kept for cross-series alignment (e.g. repo_stress spreads)
+OBS_CACHE = {}
 
 def _get_bytes(url, timeout=20):
     req = urllib.request.Request(url, headers=UA)
@@ -130,10 +139,24 @@ def series_block(sid, unit):
             obs = []
     if not obs:
         return {"status": "fetch_failed", "source": None}
+    OBS_CACHE[sid] = obs
     latest = obs[0]
-    prior = pick(obs, PRIOR) if PRIOR != "none" else None
     res = {"status": "ok", "source": source,
            "latest_date": latest[0], "latest": latest[1]}
+    if sid in LAGGED_TRAILING_WEEK:
+        base_target = (datetime.strptime(latest[0], "%Y-%m-%d")
+                       - timedelta(days=7)).strftime("%Y-%m-%d")
+        base = pick(obs, base_target)
+        if base and base[0] != latest[0]:
+            res["prior_date"], res["prior"] = base
+            delta = latest[1] - base[1]
+            if unit == "pct":
+                res["delta_bps"] = round(delta * 100, 1)
+            res["delta_abs"] = round(delta, 3)
+            res["delta_note"] = ("trailing ~7d within the series' own timeline "
+                                 "(publication lag; not aligned to prior-run date)")
+        return res
+    prior = pick(obs, PRIOR) if PRIOR != "none" else None
     if prior and prior[0] != latest[0]:
         delta = latest[1] - prior[1]
         res["prior_date"], res["prior"] = prior[0], prior[1]
@@ -224,13 +247,18 @@ def cftc_lev_funds():
 
     by_date = {}
     year = datetime.now(timezone.utc).year
-    try:
-        raw = _get_bytes(f"https://www.cftc.gov/files/dea/history/fut_fin_txt_{year}.zip",
-                         timeout=45)
-        parse(zipfile.ZipFile(io.BytesIO(raw)).read("FinFutYY.txt").decode("latin-1"),
-              by_date)
-    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
-        pass
+    for yr in (year, year - 1):
+        # prior-year archive only when the current year is too short for the
+        # 8-week trend + delta_4w (early-January runs, or missing new-year zip)
+        if yr != year and len(by_date) >= 9:
+            break
+        try:
+            raw = _get_bytes(f"https://www.cftc.gov/files/dea/history/fut_fin_txt_{yr}.zip",
+                             timeout=45)
+            parse(zipfile.ZipFile(io.BytesIO(raw)).read("FinFutYY.txt").decode("latin-1"),
+                  by_date)
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+            pass
     try:
         weekly = {}
         parse(_get("https://www.cftc.gov/dea/newcot/FinFutWk.txt", timeout=30), weekly)
@@ -310,17 +338,29 @@ def main():
     out["cftc_lev_funds"] = cftc_lev_funds()
     out["move_index"] = move_index()
     out["ofr_repo"] = ofr_repo()
-    # derived repo-stress convenience block (SOFR-IORB spreads + SRF usage)
+    # derived repo-stress convenience block (SOFR-IORB spreads + SRF usage).
+    # IORB is a 7-day policy-rate series while SOFR prints T+1 on business
+    # days, so align IORB (and SOFR99) to the SOFR observation date before
+    # subtracting - otherwise an FOMC move fabricates a spread jump.
     sofr = out["series"].get("SOFR", {})
     iorb = out["series"].get("IORB", {})
     if sofr.get("status") == "ok" and iorb.get("status") == "ok":
-        rs = {"status": "ok", "as_of": sofr["latest_date"],
-              "sofr": sofr["latest"], "iorb": iorb["latest"],
-              "sofr_iorb_bps": round((sofr["latest"] - iorb["latest"]) * 100, 1)}
+        as_of = sofr["latest_date"]
+        iorb_al = pick(OBS_CACHE.get("IORB", []), as_of) \
+            or (iorb["latest_date"], iorb["latest"])
+        rs = {"status": "ok", "as_of": as_of,
+              "sofr": sofr["latest"], "iorb": iorb_al[1],
+              "sofr_iorb_bps": round((sofr["latest"] - iorb_al[1]) * 100, 1)}
+        if iorb_al[0] != as_of:
+            rs["iorb_date"] = iorb_al[0]
         s99 = out["series"].get("SOFR99", {})
         if s99.get("status") == "ok":
-            rs["sofr99_iorb_bps"] = round((s99["latest"] - iorb["latest"]) * 100, 1)
-        srf = out["series"].get("RPONTSYD", {})
+            s99_al = pick(OBS_CACHE.get("SOFR99", []), as_of) \
+                or (s99["latest_date"], s99["latest"])
+            rs["sofr99_iorb_bps"] = round((s99_al[1] - iorb_al[1]) * 100, 1)
+            if s99_al[0] != as_of:
+                rs["sofr99_date"] = s99_al[0]
+        srf = out["series"].get("RPONTTLD", {})
         if srf.get("status") == "ok":
             rs["srf_usage_bn"] = srf["latest"]
             rs["srf_date"] = srf["latest_date"]
