@@ -3,7 +3,11 @@
 
 Fetches FRED series (with EIA / US Treasury fallback) via urllib + a custom
 User-Agent, computes week-over-week deltas vs the prior-run date, and prints
-one JSON block to stdout. Never prints API keys. stdlib only.
+one JSON block to stdout. Also emits non-FRED blocks: cftc_lev_funds
+(leveraged-fund net position in UST futures), move_index (^MOVE via Yahoo
+chart endpoint), ofr_repo (OFR tri-party repo volume), and a derived
+repo_stress block (SOFR-IORB spreads + SRF usage). Never prints API keys.
+stdlib only.
 
 Usage: python3 fetch_macro.py <prior_run_date YYYY-MM-DD | none>
 """
@@ -23,6 +27,8 @@ FRED_SERIES = {
     "ECBASSETSW": "eur_mn", "JPNASSETS": "jpy_100mn",
     "BOGZ1FL153064486Q": "level",
     "T5YIFR": "pct", "CPIAUCSL": "level",
+    "THREEFYTP10": "pct", "SOFR": "pct", "SOFR99": "pct", "IORB": "pct",
+    "RPONTSYD": "usd_bn", "LNFACBW027SBOG": "usd_bn",
 }
 
 # Low-frequency series need a wider window: quarterly prints are often
@@ -31,10 +37,13 @@ QUARTERLY_SERIES = {"BOGZ1FL153064486Q"}
 YOY_SERIES = {"CPIAUCSL"}
 WIDE_WINDOW_SERIES = QUARTERLY_SERIES | YOY_SERIES
 
-def _get(url, timeout=20):
+def _get_bytes(url, timeout=20):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode()
+        return r.read()
+
+def _get(url, timeout=20):
+    return _get_bytes(url, timeout).decode()
 
 def fred_obs(series_id):
     """Return list of (date, float) desc, newest first. Raises on failure."""
@@ -130,7 +139,7 @@ def series_block(sid, unit):
         res["prior_date"], res["prior"] = prior[0], prior[1]
         if unit == "pct":
             res["delta_bps"] = round(delta * 100, 1)
-        if unit == "usd" and prior[1]:
+        if unit in ("usd", "usd_bn") and prior[1]:
             res["chg_pct"] = round(delta / prior[1] * 100, 2)
         res["delta_abs"] = round(delta, 3)
     elif prior and sid not in WIDE_WINDOW_SERIES:
@@ -140,7 +149,7 @@ def series_block(sid, unit):
         res["no_new_obs"] = True
         if unit == "pct":
             res["delta_bps"] = 0.0
-        if unit == "usd":
+        if unit in ("usd", "usd_bn"):
             res["chg_pct"] = 0.0
         res["delta_abs"] = 0.0
     if sid in YOY_SERIES:
@@ -190,12 +199,134 @@ def sp500_trend():
         res["no_new_obs"] = True
     return res
 
+def cftc_lev_funds():
+    """Aggregate leveraged-fund net position in UST futures (CFTC TFF).
+
+    Contract-count sum of Lev_Money long minus short across the six CBT
+    Treasury contracts, from the current-year history zip (trend) merged
+    with the latest weekly file. No API key.
+    """
+    import csv, io, zipfile
+    markets = ("UST BOND", "ULTRA UST BOND", "UST 2Y NOTE", "UST 5Y NOTE",
+               "UST 10Y NOTE", "ULTRA UST 10Y")
+
+    def parse(text, acc):
+        for line in text.splitlines():
+            if not line.strip() or line.startswith('"Market_and_Exchange_Names"'):
+                continue
+            f = next(csv.reader([line]))
+            if len(f) < 17 or not f[0].startswith(markets):
+                continue
+            try:
+                acc[f[2].strip()] = acc.get(f[2].strip(), 0) + int(f[14]) - int(f[15])
+            except ValueError:
+                continue
+
+    by_date = {}
+    year = datetime.now(timezone.utc).year
+    try:
+        raw = _get_bytes(f"https://www.cftc.gov/files/dea/history/fut_fin_txt_{year}.zip",
+                         timeout=45)
+        parse(zipfile.ZipFile(io.BytesIO(raw)).read("FinFutYY.txt").decode("latin-1"),
+              by_date)
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+        pass
+    try:
+        weekly = {}
+        parse(_get("https://www.cftc.gov/dea/newcot/FinFutWk.txt", timeout=30), weekly)
+        by_date.update(weekly)
+    except (OSError, ValueError):
+        pass
+    if not by_date:
+        return {"status": "fetch_failed", "source": None}
+    dates = sorted(by_date)
+    res = {"status": "ok", "source": "CFTC TFF futures-only (weekly + history zip)",
+           "latest_date": dates[-1], "net_contracts": by_date[dates[-1]],
+           "markets": list(markets),
+           "recent_weeks": [{"date": d, "net": by_date[d]} for d in dates[-8:]]}
+    if len(dates) >= 5:
+        res["delta_4w"] = by_date[dates[-1]] - by_date[dates[-5]]
+    return res
+
+def move_index():
+    """^MOVE via Yahoo Finance chart endpoint (unofficial; may break)."""
+    url = ("https://query1.finance.yahoo.com/v8/finance/chart/%5EMOVE"
+           "?range=3mo&interval=1d")
+    try:
+        r = json.loads(_get(url, timeout=20))["chart"]["result"][0]
+        pairs = zip(r["timestamp"], r["indicators"]["quote"][0]["close"])
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        return {"status": "fetch_failed", "source": None}
+    obs = [(datetime.fromtimestamp(t, tz=timezone.utc).strftime("%Y-%m-%d"),
+            round(float(c), 2)) for t, c in pairs if c is not None]
+    if not obs:
+        return {"status": "fetch_failed", "source": "Yahoo chart API"}
+    obs.sort(reverse=True)
+    res = {"status": "ok", "source": "Yahoo Finance chart API (^MOVE, unofficial)",
+           "latest_date": obs[0][0], "latest": obs[0][1]}
+    prior = pick(obs, PRIOR) if PRIOR != "none" else None
+    if prior and prior[0] != obs[0][0]:
+        res["prior_date"], res["prior"] = prior
+        res["delta_abs"] = round(obs[0][1] - prior[1], 2)
+    elif prior:
+        res["prior_date"], res["prior"] = prior
+        res["delta_abs"] = 0.0
+        res["no_new_obs"] = True
+    return res
+
+def ofr_repo():
+    """OFR Short-term Funding Monitor: tri-party repo outstanding volume."""
+    mnemonic = "REPO-TRI_TV_TOT-P"
+    url = f"https://data.financialresearch.gov/v1/series/full?mnemonic={mnemonic}"
+    try:
+        agg = json.loads(_get(url, timeout=30))[mnemonic]["timeseries"]["aggregation"]
+        obs = [(d, float(v)) for d, v in agg if v is not None]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"status": "fetch_failed", "source": None}
+    if not obs:
+        return {"status": "fetch_failed", "source": "OFR STFM"}
+    obs.sort(reverse=True)
+    res = {"status": "ok", "source": f"OFR Short-term Funding Monitor ({mnemonic})",
+           "latest_date": obs[0][0], "latest_usd_bn": round(obs[0][1] / 1e9, 1)}
+    prior = pick(obs, PRIOR) if PRIOR != "none" else None
+    if prior and prior[0] != obs[0][0]:
+        res["prior_date"] = prior[0]
+        res["prior_usd_bn"] = round(prior[1] / 1e9, 1)
+        if prior[1]:
+            res["chg_pct"] = round((obs[0][1] - prior[1]) / prior[1] * 100, 2)
+    elif prior:
+        res["prior_date"] = prior[0]
+        res["prior_usd_bn"] = round(prior[1] / 1e9, 1)
+        res["chg_pct"] = 0.0
+        res["no_new_obs"] = True
+    return res
+
 def main():
     out = {"prior_run_date": PRIOR, "fred_key_present": bool(FRED_KEY),
            "eia_key_present": bool(EIA_KEY), "series": {}}
     for sid, unit in FRED_SERIES.items():
         out["series"][sid] = series_block(sid, unit)
     out["sp500_trend"] = sp500_trend()
+    out["cftc_lev_funds"] = cftc_lev_funds()
+    out["move_index"] = move_index()
+    out["ofr_repo"] = ofr_repo()
+    # derived repo-stress convenience block (SOFR-IORB spreads + SRF usage)
+    sofr = out["series"].get("SOFR", {})
+    iorb = out["series"].get("IORB", {})
+    if sofr.get("status") == "ok" and iorb.get("status") == "ok":
+        rs = {"status": "ok", "as_of": sofr["latest_date"],
+              "sofr": sofr["latest"], "iorb": iorb["latest"],
+              "sofr_iorb_bps": round((sofr["latest"] - iorb["latest"]) * 100, 1)}
+        s99 = out["series"].get("SOFR99", {})
+        if s99.get("status") == "ok":
+            rs["sofr99_iorb_bps"] = round((s99["latest"] - iorb["latest"]) * 100, 1)
+        srf = out["series"].get("RPONTSYD", {})
+        if srf.get("status") == "ok":
+            rs["srf_usage_bn"] = srf["latest"]
+            rs["srf_date"] = srf["latest_date"]
+        out["repo_stress"] = rs
+    else:
+        out["repo_stress"] = {"status": "unavailable"}
     # T10YIE derive fallback if it failed but DGS10/DFII10 ok
     t = out["series"].get("T10YIE", {})
     if t.get("status") != "ok":
