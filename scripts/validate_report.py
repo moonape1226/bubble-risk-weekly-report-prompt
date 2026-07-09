@@ -3,7 +3,10 @@
 
 Checks the locked skeleton (12 sections, exact headings, §1/§2/§3 columns),
 the exact final disclaimer line, the score-JSON schema / arithmetic / tier,
-bar-chart-vs-score consistency, and the 總評 line. stdlib only.
+bar-chart-vs-score consistency, the 總評 line, and that no ASCII '~' (a '~' pair
+renders as strikethrough on the blob view, and a '\\~' escape prints a literal
+backslash on the Python-Markdown Pages build) leaks into report-visible text.
+stdlib only.
 
 Usage: python3 validate_report.py <report.md> [--coverage-rows N]
 Exits 0 when every check passes; prints one FAIL line per defect and exits 1.
@@ -120,6 +123,31 @@ def main():
     hit = sorted({c for c in text if c in BOX_CHARS})
     if hit:
         fail(f"含禁用框線字元：{''.join(hit)}")
+    # ASCII '~' is unsafe in report-visible text under BOTH renderers this
+    # archive uses, so neither a bare '~' nor a '\~' escape is allowed:
+    #  - GitHub blob view (GFM) parses a '~' pair on one line/paragraph as a
+    #    strikethrough delimiter, striking the span between them and corrupting
+    #    any adjacent **bold**;
+    #  - GitHub Pages (scripts/build_site.py, Python-Markdown) does not treat
+    #    '\~' as an escape and prints a literal backslash.
+    # Use ≈ / 約 instead. Ignore fenced/inline code and URLs.
+    tilde_lines, in_fence = [], False
+    for n, l in enumerate(lines, 1):
+        if l.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        stripped = re.sub(r"`[^`]*`", "", l)
+        stripped = re.sub(r"https?://\S+", "", stripped)
+        if "~" in stripped:
+            tilde_lines.append(n)
+    if tilde_lines:
+        shown = ", ".join(map(str, tilde_lines[:10]))
+        more = "" if len(tilde_lines) <= 10 else f" 等共 {len(tilde_lines)} 行"
+        fail(f"含 ASCII `~`（blob GFM 成對→刪除線並破壞 **粗體**；Pages 的 "
+             f"Python-Markdown 不吃 \\~ 轉義、會印出反斜線）；報告可見文字改用 "
+             f"≈／約。行：{shown}{more}")
     # 本期 is banned in section names, table columns, meta/labels, 本次新增訊號,
     # and 本次分數存檔 — not in ordinary prose
     section = None
