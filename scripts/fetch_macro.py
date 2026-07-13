@@ -415,13 +415,16 @@ def decomposition_block(series):
         driver = "unknown"
         note += ("; ΔT10YIE unavailable and not rebuilt "
                  "(DGS10/DFII10 windows differ - identity does not hold)")
+    elif not d["DGS10"] and not d["DFII10"] and not t:
+        # all-zero (e.g. no_new_obs holiday runs) needs no window alignment
+        # to attribute — checked before the window guard so a one-day print
+        # lag does not turn 無變動 into 不可判
+        driver = "none"
     elif not rebuilt and not w_n == w_r == w_t:
         # a direct ΔT10YIE from a different window breaks the identity too
         driver = "unknown"
         note += ("; ΔT10YIE covers a different window than DGS10/DFII10 - "
                  "driver not judged (identity does not hold across windows)")
-    elif not d["DGS10"] and not d["DFII10"] and not t:
-        driver = "none"
     elif abs(t) > abs(d["DFII10"]):
         driver = "breakeven"
     elif abs(d["DFII10"]) > abs(t):
