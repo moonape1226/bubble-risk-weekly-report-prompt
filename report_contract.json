@@ -1,0 +1,326 @@
+{
+  "version": 1,
+  "timezone": "Asia/Taipei",
+  "macro_schema": {
+    "version": 1,
+    "required_series": [
+      "DGS10", "DFII10", "T10YIE", "BAMLH0A0HYM2", "BAMLC0A0CM",
+      "DFEDTARU", "DFEDTARL", "WALCL", "DCOILWTICO", "ECBASSETSW",
+      "JPNASSETS", "BOGZ1FL153064486Q", "T5YIFR", "CPIAUCSL",
+      "THREEFYTP10", "SOFR", "SOFR99", "IORB", "RPONTTLD",
+      "LNFACBW027SBOG"
+    ],
+    "series_units": {
+      "DGS10": "pct", "DFII10": "pct", "T10YIE": "pct",
+      "BAMLH0A0HYM2": "pct", "BAMLC0A0CM": "pct",
+      "DFEDTARU": "pct", "DFEDTARL": "pct", "WALCL": "usd_mn",
+      "DCOILWTICO": "usd", "ECBASSETSW": "eur_mn",
+      "JPNASSETS": "jpy_100mn", "BOGZ1FL153064486Q": "level",
+      "T5YIFR": "pct", "CPIAUCSL": "level", "THREEFYTP10": "pct",
+      "SOFR": "pct", "SOFR99": "pct", "IORB": "pct",
+      "RPONTTLD": "usd_bn", "LNFACBW027SBOG": "usd_bn"
+    },
+    "trailing_delta_days": {"THREEFYTP10": 7},
+    "yoy_base_age_days": {"CPIAUCSL": {"min": 350, "max": 380, "same_month_previous_year": true}},
+    "alignment_proof_series": ["DGS10", "DFII10", "IORB", "SOFR99"],
+    "derived_series": {
+      "T10YIE": {
+        "source": "DGS10 - DFII10",
+        "left": "DGS10",
+        "right": "DFII10"
+      }
+    },
+    "required_blocks": [
+      "sp500_trend", "cftc_lev_funds", "move_index", "ofr_repo",
+      "repo_stress", "decomposition"
+    ]
+  },
+  "disclaimer": "本報告為相對風險溫度計，非擇時訊號。",
+  "headings": [
+    "## §1 六維度風險條圖",
+    "## §2 歷史錨點相似度",
+    "## §3 三角訊號",
+    "## 六維度評分",
+    "## 綜合分數",
+    "## 歷史泡沫週期對比",
+    "## 機構情緒對照",
+    "## 本次新增訊號",
+    "## 數據附錄",
+    "## 本次分數存檔"
+  ],
+  "wording_lock": {
+    "full_section_heading_indexes": [2, 7, 9],
+    "forbidden_synonyms": ["本期", "本輪"]
+  },
+  "dimensions": [
+    {"name": "估值溢價", "key": "valuation", "weight": 22},
+    {"name": "市場廣度", "key": "breadth", "weight": 13},
+    {"name": "投機行為", "key": "speculation", "weight": 18},
+    {"name": "散戶情緒", "key": "retail", "weight": 12},
+    {"name": "貨幣與信貸環境", "key": "monetary", "weight": 20},
+    {"name": "結構性槓桿", "key": "structural", "weight": 15}
+  ],
+  "tiers": [
+    {"min": 0, "max": 19, "name": "低"},
+    {"min": 20, "max": 39, "name": "溫和"},
+    {"min": 40, "max": 64, "name": "警戒"},
+    {"min": 65, "max": 84, "name": "高"},
+    {"min": 85, "max": 100, "name": "極度狂熱"}
+  ],
+  "anchors": [
+    "1997 早期建設",
+    "1998 LTCM 衝擊",
+    "1999 晚期狂熱",
+    "2000/3 頂點",
+    "2021/12 Meme 頂"
+  ],
+  "anchor_feature_counts": {
+    "1997 早期建設": 8,
+    "1998 LTCM 衝擊": 8,
+    "1999 晚期狂熱": 10,
+    "2000/3 頂點": 8,
+    "2021/12 Meme 頂": 8
+  },
+  "regimes": ["穩定共存", "同向偏高", "分歧", "基準日", "不可判"],
+  "trigger_states": ["未擊發", "初啟", "已擊發"],
+  "monetary_sides": ["自滿側", "扳機側", "中性"],
+  "triangle_indicators": ["S&P 500", "WTI 原油", "10Y Treasury"],
+  "triangle_labels": ["三者狀態", "格局轉變", "10Y 成因拆解", "扳機鏈", "扳機理由", "結論"],
+  "triangle_fallbacks": [
+    {"key": "sp500", "source_id": "valuation.sp500_trend", "component": "sp500_trend"},
+    {"key": "wti", "source_id": "monetary.wti", "component": "DCOILWTICO"},
+    {"key": "dgs10", "source_id": "monetary.dgs10", "component": "DGS10"}
+  ],
+  "dimension_required_inputs": {
+    "monetary": [
+      {"source_id": "monetary.ig_oas", "indicator": "BAMLC0A0CM"},
+      {"source_id": "monetary.walcl", "indicator": "WALCL"},
+      {"source_id": "monetary.ecb_boj", "indicator": "ECBASSETSW"},
+      {"source_id": "monetary.ecb_boj", "indicator": "JPNASSETS"},
+      {"source_id": "monetary.pboc", "indicator": null}
+    ]
+  },
+  "triangle_chain_inputs": [
+    {"source_id": "monetary.cpi_yoy", "series": "CPIAUCSL", "value_field": "yoy_pct", "delta_field": null},
+    {"source_id": "monetary.t5yifr", "series": "T5YIFR", "value_field": "latest", "delta_field": "delta_bps"}
+  ],
+  "historical_audit_labels": ["2000/3 高位回落條件"],
+  "direction_thresholds": {
+    "sp500_chg_pct": 0.5,
+    "wti_chg_pct": 0.5,
+    "dgs10_delta_bps": 2
+  },
+  "calibration": {
+    "bar_cells": 10,
+    "dimension_delta_warning_abs": 10,
+    "historical_similarity_step_pct": 5,
+    "tier_boundary_distance": 2,
+    "sp500_high_deviation_pct": 10,
+    "hy_oas_fired_delta_bps": 50,
+    "hy_oas_initial_widening_streak": 2,
+    "term_premium_initial_delta_bps": 15,
+    "decomposition_identity_tolerance_bps": 0.3
+  },
+  "trigger_reason_codes": {
+    "hy_oas_fired": {"state": "已擊發", "kind": "machine"},
+    "private_credit_gate": {"state": "已擊發", "kind": "evidence", "source_ids": ["monetary.private_credit_liquidity"], "evidence_tag": "[private_credit_gate]", "window": "30d"},
+    "fund_flow_flip": {"state": "已擊發", "kind": "evidence", "source_ids": ["monetary.private_credit_liquidity"], "evidence_tag": "[fund_flow_flip]", "window": "30d"},
+    "refinancing_credit_event": {"state": "已擊發", "kind": "evidence", "source_ids": ["monetary.private_credit_liquidity", "valuation.ai_credit_schism"], "evidence_tag": "[refinancing_credit_event]", "window": "30d"},
+    "treasury_disorder": {"state": "已擊發", "kind": "evidence", "source_ids": ["structural.treasury_basis_trade"], "evidence_tag": "[treasury_disorder]", "window": "7d", "trace_required": true},
+    "official_market_intervention": {"state": "已擊發", "kind": "evidence", "source_ids": ["monetary.repo_stress_srf", "structural.treasury_basis_trade"], "evidence_tag": "[official_market_intervention]", "window": "7d", "trace_required": true},
+    "hy_streak": {"state": "初啟", "kind": "machine"},
+    "breakeven_wti_up": {"state": "初啟", "kind": "machine"},
+    "term_premium_funding": {"state": "初啟", "kind": "machine"},
+    "basis_extreme_move": {"state": "初啟", "kind": "evidence", "source_ids": ["structural.treasury_basis_trade"], "evidence_tag": "[basis_extreme_move]", "window": "7d", "prerequisite": {"type": "all", "rules": [{"type": "macro_compare", "path": ["cftc_lev_funds", "net_contracts"], "op": "lt", "value": 0}, {"type": "macro_compare", "path": ["move_index", "delta_abs"], "op": "gt", "value": 0}]}}
+  },
+  "anchor_features": {
+    "1997 早期建設": [
+      {"id": "1997.1", "rule": {"type": "score_between", "key": "valuation", "min": 40, "max": 74}},
+      {"id": "1997.2", "rule": {"type": "score_lt", "key": "breadth", "value": 45}},
+      {"id": "1997.3", "rule": {"type": "score_lt", "key": "speculation", "value": 50}},
+      {"id": "1997.4", "rule": {"type": "evidence", "source_ids": ["ai.hyperscaler_capex"]}},
+      {"id": "1997.5", "rule": {"type": "score_lt", "key": "retail", "value": 55}},
+      {"id": "1997.6", "rule": {"type": "score_lt", "key": "structural", "value": 50}},
+      {"id": "1997.7", "rule": {"type": "all", "rules": [
+        {"type": "macro_compare", "path": ["series", "BAMLH0A0HYM2", "latest"], "op": "lt", "value": 4},
+        {"type": "macro_compare", "path": ["series", "BAMLH0A0HYM2", "delta_bps"], "op": "le", "value": 0}
+      ]}},
+      {"id": "1997.8", "rule": {"type": "trigger_eq", "value": "未擊發"}}
+    ],
+    "1998 LTCM 衝擊": [
+      {"id": "1998.1", "rule": {"type": "any", "rules": [
+        {"type": "macro_compare", "path": ["series", "BAMLH0A0HYM2", "delta_bps"], "op": "ge", "value": 30},
+        {"type": "evidence", "source_ids": ["structural.cross_asset_derivatives"]}
+      ]}},
+      {"id": "1998.2", "rule": {"type": "macro_compare", "path": ["sp500_trend", "chg_pct"], "op": "le", "value": -5}},
+      {"id": "1998.3", "rule": {"type": "evidence", "source_ids": ["monetary.private_credit_liquidity", "structural.treasury_basis_trade"]}},
+      {"id": "1998.4", "rule": {"type": "evidence", "source_ids": ["monetary.fedwatch"]}},
+      {"id": "1998.5", "rule": {"type": "score_gte", "key": "valuation", "value": 60}},
+      {"id": "1998.6", "rule": {"type": "trigger_gte", "value": "初啟"}},
+      {"id": "1998.7", "rule": {"type": "score_delta_gte", "key": "breadth", "value": 8}},
+      {"id": "1998.8", "rule": {"type": "macro_compare", "path": ["decomposition", "d_t10yie_bps"], "op": "le", "value": 0}}
+    ],
+    "1999 晚期狂熱": [
+      {"id": "1999.1", "rule": {"type": "score_gte", "key": "valuation", "value": 75}},
+      {"id": "1999.2", "rule": {"type": "evidence", "source_ids": ["valuation.sp500_pe_cape"]}},
+      {"id": "1999.3", "rule": {"type": "score_gte", "key": "speculation", "value": 60}},
+      {"id": "1999.4", "rule": {"type": "evidence", "source_ids": ["speculation.microcap_moonshots", "speculation.ipo_heat"]}},
+      {"id": "1999.5", "rule": {"type": "score_gte", "key": "breadth", "value": 45}},
+      {"id": "1999.6", "rule": {"type": "all", "rules": [
+        {"type": "monetary_side_eq", "value": "自滿側"},
+        {"type": "macro_compare", "path": ["series", "BAMLH0A0HYM2", "latest"], "op": "lt", "value": 3.5}
+      ]}},
+      {"id": "1999.7", "rule": {"type": "score_gte", "key": "structural", "value": 60}},
+      {"id": "1999.8", "rule": {"type": "score_gte", "key": "retail", "value": 55}},
+      {"id": "1999.9", "rule": {"type": "evidence", "source_ids": ["speculation.upcoming_ai_ipos"]}},
+      {"id": "1999.10", "rule": {"type": "trigger_eq", "value": "未擊發"}}
+    ],
+    "2000/3 頂點": [
+      {"id": "2000.1", "rule": {"type": "score_gte", "key": "valuation", "value": 85}},
+      {"id": "2000.2", "rule": {"type": "trigger_gte", "value": "初啟"}},
+      {"id": "2000.3", "rule": {"type": "score_gte", "key": "breadth", "value": 60}},
+      {"id": "2000.4", "rule": {"type": "high_retreat"}},
+      {"id": "2000.5", "rule": {"type": "score_gte", "key": "speculation", "value": 70}},
+      {"id": "2000.6", "rule": {"type": "evidence", "source_ids": ["speculation.insider_form4"]}},
+      {"id": "2000.7", "rule": {"type": "score_gte", "key": "retail", "value": 65}},
+      {"id": "2000.8", "rule": {"type": "any", "rules": [
+        {"type": "evidence", "source_ids": ["monetary.fedwatch"]},
+        {"type": "all", "rules": [
+          {"type": "macro_equals", "path": ["decomposition", "driver"], "value": "breakeven"},
+          {"type": "macro_compare", "path": ["decomposition", "d_dgs10_bps"], "op": "gt", "value": 0}
+        ]}
+      ]}}
+    ],
+    "2021/12 Meme 頂": [
+      {"id": "2021.1", "rule": {"type": "score_gte", "key": "retail", "value": 65}},
+      {"id": "2021.2", "rule": {"type": "evidence", "source_ids": ["retail.social_sentiment"]}},
+      {"id": "2021.3", "rule": {"type": "score_gte", "key": "structural", "value": 65}},
+      {"id": "2021.4", "rule": {"type": "all", "rules": [
+        {"type": "score_gte", "key": "monetary", "value": 60},
+        {"type": "monetary_side_eq", "value": "自滿側"},
+        {"type": "evidence", "source_ids": ["monetary.walcl", "monetary.ecb_boj"]}
+      ]}},
+      {"id": "2021.5", "rule": {"type": "evidence", "source_ids": ["retail.margin_debt"]}},
+      {"id": "2021.6", "rule": {"type": "evidence", "source_ids": ["speculation.microcap_moonshots"]}},
+      {"id": "2021.7", "rule": {"type": "score_gte", "key": "breadth", "value": 50}},
+      {"id": "2021.8", "rule": {"type": "all", "rules": [
+        {"type": "macro_compare", "path": ["series", "CPIAUCSL", "yoy_pct"], "op": "ge", "value": 4},
+        {"type": "evidence", "source_ids": ["monetary.fed_funds", "monetary.fedwatch"]}
+      ]}}
+    ]
+  },
+  "score_schema": {
+    "current_fields": [
+      "date",
+      "iso_week",
+      "weekday",
+      "timezone",
+      "valuation",
+      "breadth",
+      "speculation",
+      "retail",
+      "monetary",
+      "structural",
+      "total",
+      "tier",
+      "regime",
+      "trigger_state",
+      "trigger_reasons",
+      "monetary_side",
+      "hy_oas_widening_streak",
+      "sp500_dev200_pct"
+    ],
+    "legacy_prior_required_fields": [
+      "valuation",
+      "breadth",
+      "speculation",
+      "retail",
+      "monetary",
+      "structural",
+      "total",
+      "tier"
+    ],
+    "legacy_prior_defaults": {
+      "regime": null,
+      "trigger_state": null,
+      "trigger_reasons": [],
+      "monetary_side": null,
+      "hy_oas_widening_streak": 0,
+      "sp500_dev200_pct": null
+    }
+  },
+  "coverage_statuses": [
+    "✓ API",
+    "✓ DIRECT",
+    "✓ SEARCH-VERIFIED",
+    "derived",
+    "✗ NOT DISCLOSED",
+    "⛔ FETCH FAILED"
+  ],
+  "section1_header": "| 維度 | 條圖 | 本次 | 前次 | Δ |",
+  "section2_header": "| 錨點 | 相似度 | 條圖 | 標記 |",
+  "section3_header": "| 指標 | 本次數值 | vs 前次 |",
+  "weighted_score_header": "| 維度 | 權重 | 分數 | 加權分數 |",
+  "coverage_header": "| source_id | 維度 / source bullet | 預定來源與方法 | 狀態 |",
+  "raw_data_header": "| source_id | 指標 | 數值 | 來源（FRED series ID / URL） | 資料日期 | 抓取 timestamp |",
+  "traceability_header": "| source_id | 項目 | search query | 結果 URL／來源 | 發布或資料日期 | 抓取 timestamp |",
+  "sources": [
+    {"id": "valuation.sp500_pe_cape", "required": true, "window": "snapshot", "prompt_match": "S&P 500 P/E and Shiller CAPE"},
+    {"id": "valuation.mag7_multiples", "required": true, "window": "snapshot", "prompt_match": "Mag 7 weighted P/E"},
+    {"id": "valuation.analyst_tp_decomposition", "required": false, "window": "90d", "same_quarter": true, "prompt_match": "Analyst TP upgrade decomposition"},
+    {"id": "valuation.sp500_trend", "required": true, "window": "snapshot", "prompt_match": "S&P 500 price-trend deviation", "macro": {"aggregation": "all", "components": [{"kind": "block", "key": "sp500_trend"}]}},
+    {"id": "valuation.ai_credit_schism", "required": false, "window": "14d", "prompt_match": "AI 信用定價分歧"},
+    {"id": "breadth.rsp_spy", "required": true, "window": "snapshot", "prompt_match": "S&P 500 equal-weight"},
+    {"id": "breadth.top10_concentration", "required": true, "window": "snapshot", "prompt_match": "Top-10 concentration"},
+    {"id": "breadth.advance_decline", "required": true, "window": "snapshot", "prompt_match": "Advance/decline ratio"},
+    {"id": "retail.fear_greed", "required": true, "window": "snapshot", "prompt_match": "CNN Fear & Greed Index"},
+    {"id": "retail.margin_debt", "required": true, "window": "stock_of_state", "prompt_match": "Margin Debt: FINRA"},
+    {"id": "retail.aaii", "required": true, "window": "snapshot", "prompt_match": "Retail survey: AAII"},
+    {"id": "retail.social_sentiment", "required": false, "window": "7d", "prompt_match": "Social sentiment proxies"},
+    {"id": "retail.household_equity_allocation", "required": true, "window": "stock_of_state", "prompt_match": "Household equity allocation", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "BOGZ1FL153064486Q"}]}},
+    {"id": "retail.naaim", "required": false, "window": "snapshot", "prompt_match": "NAAIM Exposure Index"},
+    {"id": "institutional.bofa_jpm_survey", "required": false, "window": "stock_of_state", "prompt_match": "BofA Fund Manager Survey"},
+    {"id": "monetary.fed_funds", "required": true, "window": "snapshot", "prompt_match": "Fed funds rate: FRED", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "DFEDTARU"}, {"kind": "series", "key": "DFEDTARL"}]}},
+    {"id": "monetary.hy_oas", "required": true, "window": "snapshot", "prompt_match": "High Yield OAS", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "BAMLH0A0HYM2"}]}},
+    {"id": "monetary.ig_oas", "required": true, "window": "snapshot", "prompt_match": "Investment Grade OAS", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "BAMLC0A0CM"}]}},
+    {"id": "monetary.dgs10", "required": true, "window": "snapshot", "prompt_match": "10Y Treasury yield", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "DGS10"}]}},
+    {"id": "monetary.dfii10", "required": true, "window": "snapshot", "prompt_match": "10Y Treasury real yield", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "DFII10"}]}},
+    {"id": "monetary.t10yie", "required": true, "window": "snapshot", "prompt_match": "10Y breakeven inflation rate", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "T10YIE"}]}},
+    {"id": "monetary.wti", "required": true, "window": "snapshot", "prompt_match": "WTI crude oil price", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "DCOILWTICO"}]}},
+    {"id": "monetary.cpi_yoy", "required": true, "window": "stock_of_state", "prompt_match": "CPI YoY: FRED", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "CPIAUCSL", "value_field": "yoy_pct"}]}},
+    {"id": "monetary.t5yifr", "required": true, "window": "snapshot", "prompt_match": "5y5y forward inflation expectation", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "T5YIFR"}]}},
+    {"id": "monetary.term_premium", "required": true, "window": "snapshot", "prompt_match": "10Y 期限溢價（term premium）: FRED", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "THREEFYTP10"}]}},
+    {"id": "monetary.repo_stress_srf", "required": true, "window": "snapshot", "prompt_match": "repo 資金壓力（SOFR−IORB）與 SRF 動用: FRED", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "SOFR"}, {"kind": "series", "key": "SOFR99"}, {"kind": "series", "key": "IORB"}, {"kind": "series", "key": "RPONTTLD"}]}},
+    {"id": "monetary.treasury_auctions", "required": false, "window": "14d", "prompt_match": "美債標售需求"},
+    {"id": "monetary.fedwatch", "required": false, "window": "snapshot", "prompt_match": "Fed funds rate path expectations"},
+    {"id": "monetary.walcl", "required": true, "window": "snapshot", "prompt_match": "Fed balance sheet: FRED", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "WALCL"}]}},
+    {"id": "monetary.ecb_boj", "required": true, "window": "snapshot", "prompt_match": "Global central bank liquidity cross-check", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "ECBASSETSW"}, {"kind": "series", "key": "JPNASSETS"}]}},
+    {"id": "monetary.pboc", "required": false, "window": "stock_of_state", "prompt_match": "PBoC aggregate financing"},
+    {"id": "monetary.private_credit_liquidity", "required": false, "window": "30d", "prompt_match": "Private-credit / non-bank fund liquidity stress"},
+    {"id": "ai.hyperscaler_capex", "required": true, "window": "stock_of_state", "prompt_match": "Hyperscaler capex guidance"},
+    {"id": "ai.token_growth", "required": false, "window": "stock_of_state", "prompt_match": "AI token volume growth rate"},
+    {"id": "ai.openai_anthropic_revenue", "required": false, "window": "stock_of_state", "prompt_match": "OpenAI / Anthropic annualized revenue"},
+    {"id": "ai.customer_concentration_rpo", "required": false, "window": "stock_of_state", "prompt_match": "Hyperscaler AI customer concentration"},
+    {"id": "ai.compute_supply_demand", "required": false, "window": "stock_of_state", "prompt_match": "AI compute supply/demand and overcapacity risk"},
+    {"id": "ai.hyperscaler_financing_mix", "required": false, "window": "composite", "component_aggregation": "all", "window_components": [{"id": "quarterly_state", "window": "stock_of_state"}, {"id": "event_scan", "window": "30d"}], "prompt_match": "Hyperscaler 融資結構"},
+    {"id": "ai.revenue_capex_gap", "required": false, "window": "stock_of_state", "prompt_match": "AI 營收對 capex 缺口"},
+    {"id": "ai.depreciation_life", "required": false, "window": "30d", "prompt_match": "GPU / 伺服器折舊年限變動"},
+    {"id": "ai.capital_cycle", "required": false, "window": "composite", "component_aggregation": "all", "window_components": [{"id": "quarterly_state", "window": "stock_of_state"}, {"id": "event_scan", "window": "30d"}], "prompt_match": "資本週期階段"},
+    {"id": "speculation.ai_rename_spac", "required": true, "window": "7d", "zero_result_allowed": true, "prompt_match": "Search for past 7 days"},
+    {"id": "speculation.ipo_heat", "required": true, "window": "7d", "prompt_match": "IPO market heat"},
+    {"id": "speculation.microcap_moonshots", "required": true, "window": "7d", "zero_result_allowed": true, "prompt_match": "Microcap thematic moonshots"},
+    {"id": "speculation.upcoming_ai_ipos", "required": false, "window": "30d", "prompt_match": "Upcoming AI IPOs"},
+    {"id": "speculation.insider_form4", "required": true, "window": "14d", "zero_result_allowed": true, "prompt_match": "Insider selling at AI"},
+    {"id": "speculation.equity_put_call", "required": false, "window": "snapshot", "prompt_match": "Cboe equity-only put/call ratio"},
+    {"id": "structural.leveraged_etf_aum", "required": true, "window": "snapshot", "prompt_match": "US leveraged ETF AUM"},
+    {"id": "structural.us_single_stock_etf", "required": true, "window": "30d", "zero_result_allowed": true, "prompt_match": "US single-stock leveraged ETF approvals"},
+    {"id": "structural.global_leveraged_approvals", "required": false, "window": "7d", "prompt_match": "Global leveraged product approvals"},
+    {"id": "structural.zero_dte", "required": true, "window": "snapshot", "prompt_match": "0DTE option volume"},
+    {"id": "structural.options_volume", "required": true, "window": "stock_of_state", "prompt_match": "Options total volume"},
+    {"id": "structural.cross_asset_derivatives", "required": true, "window": "snapshot", "prompt_match": "Cross-asset derivatives / correlation checks"},
+    {"id": "structural.margin_debt_crosscheck", "required": true, "window": "stock_of_state", "prompt_match": "Cross-reference only: FINRA margin debt"},
+    {"id": "structural.ai_infrastructure_debt", "required": false, "window": "30d", "prompt_match": "AI infrastructure debt financing / vendor-financing loops"},
+    {"id": "structural.nbfi_bank_loans", "required": true, "window": "snapshot", "prompt_match": "Bank loans to nondepository financial institutions", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "LNFACBW027SBOG"}]}},
+    {"id": "structural.treasury_basis_trade", "required": false, "window": "7d", "prompt_match": "美債基差交易槓桿（Treasury basis-trade leverage）", "macro": {"aggregation": "any", "components": [{"kind": "block", "key": "cftc_lev_funds"}, {"kind": "block", "key": "move_index"}, {"kind": "block", "key": "ofr_repo"}]}}
+  ]
+}
