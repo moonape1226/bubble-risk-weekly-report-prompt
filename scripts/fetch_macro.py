@@ -343,17 +343,51 @@ def ofr_repo():
         res["no_new_obs"] = True
     return res
 
-def derived_t10yie(n, r):
-    """T10YIE fallback from DGS10 - DFII10, both aligned to the older of the
-    two latest dates - mixed-date subtraction would fabricate a level."""
-    as_of = min(n["latest_date"], r["latest_date"])
-    n_al = pick(OBS_CACHE.get("DGS10", []), as_of) or (n["latest_date"], n["latest"])
-    r_al = pick(OBS_CACHE.get("DFII10", []), as_of) or (r["latest_date"], r["latest"])
-    blk = {"status": "derived", "source": "DGS10 - DFII10",
-           "latest_date": as_of, "latest": round(n_al[1] - r_al[1], 3)}
-    if n_al[0] != as_of or r_al[0] != as_of:
-        blk["dgs10_date"], blk["dfii10_date"] = n_al[0], r_al[0]
-    return blk
+def derived_t10yie():
+    """T10YIE fallback = DGS10 - DFII10 on their latest SHARED observation
+    date; mixed-date subtraction fabricates a level. None when no shared date."""
+    dn = dict(OBS_CACHE.get("DGS10", []))
+    dr = dict(OBS_CACHE.get("DFII10", []))
+    shared = set(dn) & set(dr)
+    if not shared:
+        return None
+    d = max(shared)
+    return {"status": "derived", "source": "DGS10 - DFII10",
+            "latest_date": d, "latest": round(dn[d] - dr[d], 3)}
+
+def repo_stress_block(series):
+    """Derived repo-stress block (SOFR-IORB spreads + SRF usage). IORB is a
+    7-day policy-rate series while SOFR prints T+1 on business days, so each
+    spread's two legs are aligned to a shared date - subtracting across an
+    FOMC move would fabricate a spread jump. SOFR99 may lag the SOFR print,
+    so its IORB leg is re-picked at the SOFR99 date, not reused from as_of."""
+    sofr, iorb = series.get("SOFR", {}), series.get("IORB", {})
+    if sofr.get("status") != "ok" or iorb.get("status") != "ok":
+        return {"status": "unavailable"}
+    as_of = sofr["latest_date"]
+    iorb_al = pick(OBS_CACHE.get("IORB", []), as_of) \
+        or (iorb["latest_date"], iorb["latest"])
+    rs = {"status": "ok", "as_of": as_of,
+          "sofr": sofr["latest"], "iorb": iorb_al[1],
+          "sofr_iorb_bps": round((sofr["latest"] - iorb_al[1]) * 100, 1)}
+    if iorb_al[0] != as_of:
+        rs["iorb_date"] = iorb_al[0]
+    s99 = series.get("SOFR99", {})
+    if s99.get("status") == "ok":
+        s99_al = pick(OBS_CACHE.get("SOFR99", []), as_of) \
+            or (s99["latest_date"], s99["latest"])
+        # no IORB print at/before the SOFR99 date -> omit the leg entirely;
+        # falling back to the SOFR-date IORB would mix dates undisclosed
+        iorb_99 = pick(OBS_CACHE.get("IORB", []), s99_al[0])
+        if iorb_99:
+            rs["sofr99_iorb_bps"] = round((s99_al[1] - iorb_99[1]) * 100, 1)
+            if s99_al[0] != as_of:
+                rs["sofr99_date"] = s99_al[0]
+    srf = series.get("RPONTTLD", {})
+    if srf.get("status") == "ok":
+        rs["srf_usage_bn"] = srf["latest"]
+        rs["srf_date"] = srf["latest_date"]
+    return rs
 
 def main():
     if PRIOR != "none":
@@ -375,41 +409,15 @@ def main():
     out["cftc_lev_funds"] = cftc_lev_funds()
     out["move_index"] = move_index()
     out["ofr_repo"] = ofr_repo()
-    # derived repo-stress convenience block (SOFR-IORB spreads + SRF usage).
-    # IORB is a 7-day policy-rate series while SOFR prints T+1 on business
-    # days, so align IORB (and SOFR99) to the SOFR observation date before
-    # subtracting - otherwise an FOMC move fabricates a spread jump.
-    sofr = out["series"].get("SOFR", {})
-    iorb = out["series"].get("IORB", {})
-    if sofr.get("status") == "ok" and iorb.get("status") == "ok":
-        as_of = sofr["latest_date"]
-        iorb_al = pick(OBS_CACHE.get("IORB", []), as_of) \
-            or (iorb["latest_date"], iorb["latest"])
-        rs = {"status": "ok", "as_of": as_of,
-              "sofr": sofr["latest"], "iorb": iorb_al[1],
-              "sofr_iorb_bps": round((sofr["latest"] - iorb_al[1]) * 100, 1)}
-        if iorb_al[0] != as_of:
-            rs["iorb_date"] = iorb_al[0]
-        s99 = out["series"].get("SOFR99", {})
-        if s99.get("status") == "ok":
-            s99_al = pick(OBS_CACHE.get("SOFR99", []), as_of) \
-                or (s99["latest_date"], s99["latest"])
-            rs["sofr99_iorb_bps"] = round((s99_al[1] - iorb_al[1]) * 100, 1)
-            if s99_al[0] != as_of:
-                rs["sofr99_date"] = s99_al[0]
-        srf = out["series"].get("RPONTTLD", {})
-        if srf.get("status") == "ok":
-            rs["srf_usage_bn"] = srf["latest"]
-            rs["srf_date"] = srf["latest_date"]
-        out["repo_stress"] = rs
-    else:
-        out["repo_stress"] = {"status": "unavailable"}
+    out["repo_stress"] = repo_stress_block(out["series"])
     # T10YIE derive fallback if it failed but DGS10/DFII10 ok
     t = out["series"].get("T10YIE", {})
     if t.get("status") != "ok":
         n, r = out["series"].get("DGS10", {}), out["series"].get("DFII10", {})
         if n.get("status") == "ok" and r.get("status") == "ok":
-            out["series"]["T10YIE"] = derived_t10yie(n, r)
+            blk = derived_t10yie()
+            if blk:
+                out["series"]["T10YIE"] = blk
     # 10Y decomposition (weekly change) if all three have deltas
     d = {}
     for k in ("DGS10", "DFII10", "T10YIE"):
