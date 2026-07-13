@@ -227,9 +227,13 @@ def main():
                 continue
             pct = cell_int(r[1])
             check_bar(r[2], pct, f"§2 {r[0]}")
-            if pct is not None and pct % 5 != 0:
+            if pct is None:
+                # an unparseable cell must fail outright — a silent None would
+                # also switch off the marked-is-max check below
+                fail(f"§2 {r[0]}: 相似度欄無法解析為整數百分比：{r[1]!r}")
+            elif pct % 5 != 0:
                 fail(f"§2 {r[0]}: 相似度 {pct}% 非 5% 刻度")
-            if pct is not None and not 0 <= pct <= 100:
+            elif not 0 <= pct <= 100:
                 fail(f"§2 {r[0]}: 相似度 {pct}% 超出 0-100")
         pcts = [cell_int(r[1]) if len(r) == 4 else None for r in s2]
         if len(marked) == 1 and pcts and all(p is not None for p in pcts):
@@ -313,20 +317,28 @@ def main():
                 tier = next(t for lo, hi, t in TIERS if lo <= score["total"] <= hi)
                 if score["tier"] != tier:
                     fail(f"tier={score['tier']} ≠ 對照表 {tier}（total {score['total']}）")
-            if score["regime"] not in REGIMES:
-                fail(f"regime={score['regime']!r} 不在允許值 {sorted(REGIMES)}")
-            if score["timezone"] != "Asia/Taipei":
-                fail(f"timezone={score['timezone']!r} ≠ Asia/Taipei")
-            if report_date and score["date"] != report_date:
-                fail(f"score.json date={score['date']} ≠ 標題日期 {report_date}")
-            try:
-                d = datetime.strptime(score["date"], "%Y-%m-%d")
-                if score["weekday"] != d.strftime("%A"):
-                    fail(f"weekday={score['weekday']} ≠ {d.strftime('%A')}")
-                if score["iso_week"] != d.strftime("%G-W%V"):
-                    fail(f"iso_week={score['iso_week']} ≠ {d.strftime('%G-W%V')}")
-            except ValueError:
-                fail(f"date={score['date']!r} 非 YYYY-MM-DD")
+            # string fields gated the same way: [] is unhashable against the
+            # REGIMES set and strptime(None) raises TypeError, not ValueError
+            strs_ok = True
+            for key in ("date", "iso_week", "weekday", "timezone", "tier", "regime"):
+                if type(score[key]) is not str:
+                    fail(f"score.json {key}={score[key]!r} 非字串")
+                    strs_ok = False
+            if strs_ok:
+                if score["regime"] not in REGIMES:
+                    fail(f"regime={score['regime']!r} 不在允許值 {sorted(REGIMES)}")
+                if score["timezone"] != "Asia/Taipei":
+                    fail(f"timezone={score['timezone']!r} ≠ Asia/Taipei")
+                if report_date and score["date"] != report_date:
+                    fail(f"score.json date={score['date']} ≠ 標題日期 {report_date}")
+                try:
+                    d = datetime.strptime(score["date"], "%Y-%m-%d")
+                    if score["weekday"] != d.strftime("%A"):
+                        fail(f"weekday={score['weekday']} ≠ {d.strftime('%A')}")
+                    if score["iso_week"] != d.strftime("%G-W%V"):
+                        fail(f"iso_week={score['iso_week']} ≠ {d.strftime('%G-W%V')}")
+                except ValueError:
+                    fail(f"date={score['date']!r} 非 YYYY-MM-DD")
             # cross-checks vs §1 and 總評
             for zh, key in DIMS:
                 if zh in s1_scores and s1_scores[zh] != score[key]:

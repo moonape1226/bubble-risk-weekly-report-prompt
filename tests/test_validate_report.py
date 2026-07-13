@@ -154,16 +154,25 @@ class ScoreJsonFailClosed(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("score.json monetary=True 非 0-100 整數", out)  # explicit type failure
 
-    def test_string_dimension_fails_cleanly_without_traceback(self):
+    def _assert_fails_cleanly(self, mutated):
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
                                          encoding="utf-8") as f:
-            f.write(VALID.replace('"valuation": 50', '"valuation": "50"'))
+            f.write(mutated)
             path = f.name
         proc = subprocess.run([sys.executable, str(VALIDATOR), path],
                               capture_output=True, text=True)
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertNotIn("Traceback", proc.stderr)
         self.assertIn("FAIL", proc.stdout)
+
+    def test_string_dimension_fails_cleanly_without_traceback(self):
+        self._assert_fails_cleanly(VALID.replace('"valuation": 50', '"valuation": "50"'))
+
+    def test_list_regime_fails_cleanly(self):
+        self._assert_fails_cleanly(VALID.replace('"regime": "穩定共存"', '"regime": []'))
+
+    def test_null_date_fails_cleanly(self):
+        self._assert_fails_cleanly(VALID.replace('"date": "2026-07-13"', '"date": null'))
 
 
 class S2AnchorLock(unittest.TestCase):
@@ -187,6 +196,16 @@ class S2AnchorLock(unittest.TestCase):
         code, out = run_validator(VALID.replace(
             "| 1998 LTCM 衝擊 | 40% | ▰▰▰▰▱▱▱▱▱▱ |  |",
             "| 1998 LTCM 衝擊 | 90% | ▰▰▰▰▰▰▰▰▰▱ |  |"))
+        self.assertEqual(code, 1, out)
+
+    def test_unparseable_pct_cannot_disable_argmax(self):
+        # a "—" similarity row must FAIL outright, not silently switch off
+        # the marked-is-max check (bypass: 90% on an unmarked anchor + one —)
+        code, out = run_validator(VALID
+            .replace("| 1998 LTCM 衝擊 | 40% | ▰▰▰▰▱▱▱▱▱▱ |  |",
+                     "| 1998 LTCM 衝擊 | — | ▰▰▰▰▱▱▱▱▱▱ |  |")
+            .replace("| 1999 晚期狂熱 | 30% | ▰▰▰▱▱▱▱▱▱▱ |  |",
+                     "| 1999 晚期狂熱 | 90% | ▰▰▰▰▰▰▰▰▰▱ |  |"))
         self.assertEqual(code, 1, out)
 
     def test_tie_break_takes_earlier_row(self):

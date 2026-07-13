@@ -365,8 +365,11 @@ def repo_stress_block(series):
     if sofr.get("status") != "ok" or iorb.get("status") != "ok":
         return {"status": "unavailable"}
     as_of = sofr["latest_date"]
-    iorb_al = pick(OBS_CACHE.get("IORB", []), as_of) \
-        or (iorb["latest_date"], iorb["latest"])
+    # no IORB print at/before the SOFR date -> no spread; falling back to a
+    # possibly NEWER iorb.latest would mix dates undisclosed
+    iorb_al = pick(OBS_CACHE.get("IORB", []), as_of)
+    if not iorb_al:
+        return {"status": "unavailable"}
     rs = {"status": "ok", "as_of": as_of,
           "sofr": sofr["latest"], "iorb": iorb_al[1],
           "sofr_iorb_bps": round((sofr["latest"] - iorb_al[1]) * 100, 1)}
@@ -374,20 +377,52 @@ def repo_stress_block(series):
         rs["iorb_date"] = iorb_al[0]
     s99 = series.get("SOFR99", {})
     if s99.get("status") == "ok":
-        s99_al = pick(OBS_CACHE.get("SOFR99", []), as_of) \
-            or (s99["latest_date"], s99["latest"])
-        # no IORB print at/before the SOFR99 date -> omit the leg entirely;
-        # falling back to the SOFR-date IORB would mix dates undisclosed
-        iorb_99 = pick(OBS_CACHE.get("IORB", []), s99_al[0])
-        if iorb_99:
+        # same rule per leg: SOFR99 at/before as_of, and IORB at/before the
+        # SOFR99 date - otherwise omit the leg rather than fabricate a value
+        s99_al = pick(OBS_CACHE.get("SOFR99", []), as_of)
+        iorb_99 = pick(OBS_CACHE.get("IORB", []), s99_al[0]) if s99_al else None
+        if s99_al and iorb_99:
             rs["sofr99_iorb_bps"] = round((s99_al[1] - iorb_99[1]) * 100, 1)
             if s99_al[0] != as_of:
                 rs["sofr99_date"] = s99_al[0]
+            if iorb_99[0] != s99_al[0]:
+                rs["sofr99_iorb_date"] = iorb_99[0]
     srf = series.get("RPONTTLD", {})
     if srf.get("status") == "ok":
         rs["srf_usage_bn"] = srf["latest"]
         rs["srf_date"] = srf["latest_date"]
     return rs
+
+def decomposition_block(series):
+    """10Y weekly-change decomposition. Rebuilding ΔT10YIE from the identity
+    ΔDGS10 − ΔDFII10 is valid only when both legs cover the same window
+    (same latest and prior dates); with ΔT10YIE unavailable the driver is
+    'unknown' rather than judged from the real leg alone."""
+    n, r = series.get("DGS10", {}), series.get("DFII10", {})
+    d = {k: series.get(k, {}).get("delta_bps") for k in ("DGS10", "DFII10", "T10YIE")}
+    if d["DGS10"] is None or d["DFII10"] is None:
+        return {"status": "unavailable_no_daily_history"}
+    note = "weekly change in bps; computed from daily history"
+    if d["T10YIE"] is None and n.get("latest_date") == r.get("latest_date") \
+            and n.get("prior_date") == r.get("prior_date"):
+        d["T10YIE"] = round(d["DGS10"] - d["DFII10"], 1)
+    t = d["T10YIE"]
+    if t is None:
+        driver = "unknown"
+        note += ("; ΔT10YIE unavailable and not rebuilt "
+                 "(DGS10/DFII10 windows differ - identity does not hold)")
+    elif not d["DGS10"] and not d["DFII10"] and not t:
+        driver = "none"
+    elif abs(t) > abs(d["DFII10"]):
+        driver = "breakeven"
+    elif abs(d["DFII10"]) > abs(t):
+        driver = "real-rate"
+    else:
+        driver = "mixed"
+    if any(series.get(k, {}).get("no_new_obs") for k in ("DGS10", "DFII10", "T10YIE")):
+        note += "; no new observations since the prior run (delta 0 by construction)"
+    return {"d_dgs10_bps": d["DGS10"], "d_dfii10_bps": d["DFII10"],
+            "d_t10yie_bps": t, "driver": driver, "note": note}
 
 def main():
     if PRIOR != "none":
@@ -418,35 +453,7 @@ def main():
             blk = derived_t10yie()
             if blk:
                 out["series"]["T10YIE"] = blk
-    # 10Y decomposition (weekly change) if all three have deltas
-    d = {}
-    for k in ("DGS10", "DFII10", "T10YIE"):
-        s = out["series"].get(k, {})
-        d[k] = s.get("delta_bps")
-    # T10YIE may be level-derived (DGS10 - DFII10) with no daily-history delta;
-    # reconstruct its weekly delta from the identity so the third term and driver hold.
-    if d["T10YIE"] is None and d["DGS10"] is not None and d["DFII10"] is not None:
-        d["T10YIE"] = round(d["DGS10"] - d["DFII10"], 1)
-    if all(d[k] is not None for k in ("DGS10", "DFII10")):
-        t = d.get("T10YIE")
-        if not d["DGS10"] and not d["DFII10"] and not t:
-            driver = "none"
-        elif abs(t or 0) > abs(d["DFII10"] or 0):
-            driver = "breakeven"
-        elif abs(d["DFII10"] or 0) > abs(t or 0):
-            driver = "real-rate"
-        else:
-            driver = "mixed"
-        note = "weekly change in bps; computed from daily history"
-        if any(out["series"].get(k, {}).get("no_new_obs")
-               for k in ("DGS10", "DFII10", "T10YIE")):
-            note += "; no new observations since the prior run (delta 0 by construction)"
-        out["decomposition"] = {
-            "d_dgs10_bps": d["DGS10"], "d_dfii10_bps": d["DFII10"],
-            "d_t10yie_bps": t, "driver": driver, "note": note,
-        }
-    else:
-        out["decomposition"] = {"status": "unavailable_no_daily_history"}
+    out["decomposition"] = decomposition_block(out["series"])
     print("===MACRO_JSON_START===")
     print(json.dumps(out, ensure_ascii=False, indent=2))
     print("===MACRO_JSON_END===")

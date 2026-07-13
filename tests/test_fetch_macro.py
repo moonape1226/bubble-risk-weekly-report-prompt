@@ -123,9 +123,99 @@ class RepoStressAlignment(unittest.TestCase):
         self.assertEqual(rs["status"], "ok")
         self.assertNotIn("sofr99_iorb_bps", rs)
 
+    def test_unavailable_when_no_iorb_at_or_before_sofr(self):
+        # IORB cache only has a print NEWER than the SOFR date: no tuple
+        # fallback to iorb.latest — the block must degrade to unavailable
+        fm.OBS_CACHE.update({
+            "SOFR": [("2026-07-30", 4.62)],
+            "IORB": [("2026-07-31", 4.15)],
+        })
+        series = {
+            "SOFR": {"status": "ok", "latest_date": "2026-07-30", "latest": 4.62},
+            "IORB": {"status": "ok", "latest_date": "2026-07-31", "latest": 4.15},
+        }
+        rs = fm.repo_stress_block(series)
+        self.assertEqual(rs["status"], "unavailable")
+
+    def test_sofr99_skipped_when_only_newer_than_as_of(self):
+        # SOFR99 printed only after as_of: no fallback to its newer latest
+        fm.OBS_CACHE.update({
+            "SOFR": [("2026-07-30", 4.62)],
+            "IORB": [("2026-07-30", 4.40)],
+            "SOFR99": [("2026-07-31", 4.70)],
+        })
+        series = {
+            "SOFR": {"status": "ok", "latest_date": "2026-07-30", "latest": 4.62},
+            "IORB": {"status": "ok", "latest_date": "2026-07-30", "latest": 4.40},
+            "SOFR99": {"status": "ok", "latest_date": "2026-07-31", "latest": 4.70},
+        }
+        rs = fm.repo_stress_block(series)
+        self.assertEqual(rs["status"], "ok")
+        self.assertAlmostEqual(rs["sofr_iorb_bps"], 22.0)
+        self.assertNotIn("sofr99_iorb_bps", rs)
+
+    def test_sofr99_leg_disclosed_when_iorb_older_than_sofr99(self):
+        # SOFR99 lags as_of and IORB has no print on the SOFR99 date either:
+        # the leg may use the older IORB but must disclose its date
+        fm.OBS_CACHE.update({
+            "SOFR": [("2026-08-01", 4.40)],
+            "IORB": [("2026-08-01", 4.15), ("2026-07-28", 3.90)],
+            "SOFR99": [("2026-07-30", 4.55)],
+        })
+        series = {
+            "SOFR": {"status": "ok", "latest_date": "2026-08-01", "latest": 4.40},
+            "IORB": {"status": "ok", "latest_date": "2026-08-01", "latest": 4.15},
+            "SOFR99": {"status": "ok", "latest_date": "2026-07-30", "latest": 4.55},
+        }
+        rs = fm.repo_stress_block(series)
+        self.assertAlmostEqual(rs["sofr99_iorb_bps"], 65.0)  # 4.55 - 3.90
+        self.assertEqual(rs["sofr99_date"], "2026-07-30")
+        self.assertEqual(rs["sofr99_iorb_date"], "2026-07-28")
+
     def test_unavailable_when_sofr_missing(self):
         rs = fm.repo_stress_block({"IORB": {"status": "ok"}})
         self.assertEqual(rs["status"], "unavailable")
+
+
+class DecompositionWindow(unittest.TestCase):
+    """ΔT10YIE may be rebuilt from ΔDGS10 − ΔDFII10 only when both legs
+    cover the same window (same latest and prior dates)."""
+
+    def test_rebuild_on_same_window(self):
+        series = {
+            "DGS10": {"status": "ok", "latest_date": "2026-07-10",
+                      "prior_date": "2026-07-03", "delta_bps": 6.0},
+            "DFII10": {"status": "ok", "latest_date": "2026-07-10",
+                       "prior_date": "2026-07-03", "delta_bps": 2.0},
+            "T10YIE": {"status": "derived"},
+        }
+        blk = fm.decomposition_block(series)
+        self.assertAlmostEqual(blk["d_t10yie_bps"], 4.0)
+        self.assertEqual(blk["driver"], "breakeven")
+
+    def test_no_rebuild_on_mismatched_window(self):
+        series = {
+            "DGS10": {"status": "ok", "latest_date": "2026-07-10",
+                      "prior_date": "2026-07-03", "delta_bps": 6.0},
+            "DFII10": {"status": "ok", "latest_date": "2026-07-09",
+                       "prior_date": "2026-07-02", "delta_bps": 2.0},
+            "T10YIE": {"status": "derived"},
+        }
+        blk = fm.decomposition_block(series)
+        self.assertIsNone(blk["d_t10yie_bps"])
+        self.assertEqual(blk["driver"], "unknown")
+
+    def test_direct_t10yie_delta_passthrough(self):
+        series = {
+            "DGS10": {"status": "ok", "latest_date": "2026-07-10",
+                      "prior_date": "2026-07-03", "delta_bps": 6.0},
+            "DFII10": {"status": "ok", "latest_date": "2026-07-10",
+                       "prior_date": "2026-07-03", "delta_bps": 5.0},
+            "T10YIE": {"status": "ok", "delta_bps": 1.0},
+        }
+        blk = fm.decomposition_block(series)
+        self.assertAlmostEqual(blk["d_t10yie_bps"], 1.0)
+        self.assertEqual(blk["driver"], "real-rate")
 
 
 class Pick(unittest.TestCase):
