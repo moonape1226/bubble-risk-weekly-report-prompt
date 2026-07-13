@@ -216,26 +216,33 @@ def main():
         names = [r[0].replace("*", "") for r in s2 if r]
         if names != ANCHORS:
             fail(f"§2 錨點列應為固定五錨點（依序 {ANCHORS}），實得：{names}")
-        marked = [r for r in s2 if len(r) == 4 and "◀ 最貼近" in r[3]]
+        marked = [r for r in s2 if len(r) == 4 and r[3] == "◀ 最貼近"]
         if len(marked) != 1:
             fail(f"§2「◀ 最貼近」應恰一列，實得 {len(marked)}")
-        else:
-            closest = (marked[0][0], cell_int(marked[0][1]))
+        pcts = []
         for r in s2:
             if len(r) != 4:
                 fail(f"§2 欄數 ≠ 4：{r}")
+                pcts.append(None)
                 continue
-            pct = cell_int(r[1])
+            # full-format checks: cell_int-style loose parsing accepted
+            # "40.5%" / "foo50%", and substring matching accepted decorated
+            # marker cells — a silent None would also switch off the
+            # marked-is-max check below
+            m2 = re.fullmatch(r"(\d{1,3})%", r[1])
+            pct = int(m2.group(1)) if m2 else None
+            pcts.append(pct)
             check_bar(r[2], pct, f"§2 {r[0]}")
             if pct is None:
-                # an unparseable cell must fail outright — a silent None would
-                # also switch off the marked-is-max check below
-                fail(f"§2 {r[0]}: 相似度欄無法解析為整數百分比：{r[1]!r}")
+                fail(f"§2 {r[0]}: 相似度欄格式應為 `<整數>%`：{r[1]!r}")
             elif pct % 5 != 0:
                 fail(f"§2 {r[0]}: 相似度 {pct}% 非 5% 刻度")
-            elif not 0 <= pct <= 100:
+            elif pct > 100:
                 fail(f"§2 {r[0]}: 相似度 {pct}% 超出 0-100")
-        pcts = [cell_int(r[1]) if len(r) == 4 else None for r in s2]
+            if r[3] not in ("", "◀ 最貼近"):
+                fail(f"§2 {r[0]}: 標記欄僅允許空白或「◀ 最貼近」：{r[3]!r}")
+        if len(marked) == 1:
+            closest = (marked[0][0], pcts[s2.index(marked[0])])
         if len(marked) == 1 and pcts and all(p is not None for p in pcts):
             best_idx = max(range(len(pcts)), key=lambda i: pcts[i])  # first of ties
             mark_idx = s2.index(marked[0])

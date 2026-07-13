@@ -211,11 +211,27 @@ class DecompositionWindow(unittest.TestCase):
                       "prior_date": "2026-07-03", "delta_bps": 6.0},
             "DFII10": {"status": "ok", "latest_date": "2026-07-10",
                        "prior_date": "2026-07-03", "delta_bps": 5.0},
-            "T10YIE": {"status": "ok", "delta_bps": 1.0},
+            "T10YIE": {"status": "ok", "latest_date": "2026-07-10",
+                       "prior_date": "2026-07-03", "delta_bps": 1.0},
         }
         blk = fm.decomposition_block(series)
         self.assertAlmostEqual(blk["d_t10yie_bps"], 1.0)
         self.assertEqual(blk["driver"], "real-rate")
+
+    def test_direct_t10yie_mismatched_window_keeps_delta_but_unknown_driver(self):
+        # 6 ≠ 2 + 20: the direct T10YIE delta covers a different window, so
+        # the identity does not hold and the driver must not be judged
+        series = {
+            "DGS10": {"status": "ok", "latest_date": "2026-07-10",
+                      "prior_date": "2026-07-03", "delta_bps": 6.0},
+            "DFII10": {"status": "ok", "latest_date": "2026-07-10",
+                       "prior_date": "2026-07-03", "delta_bps": 2.0},
+            "T10YIE": {"status": "ok", "latest_date": "2026-07-09",
+                       "prior_date": "2026-07-02", "delta_bps": 20.0},
+        }
+        blk = fm.decomposition_block(series)
+        self.assertAlmostEqual(blk["d_t10yie_bps"], 20.0)
+        self.assertEqual(blk["driver"], "unknown")
 
 
 class Pick(unittest.TestCase):
