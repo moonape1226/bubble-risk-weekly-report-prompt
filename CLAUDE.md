@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A twice-weekly (Mon + Thu, Asia/Taipei) market "bubble risk" report in Traditional Chinese. The entire behaviour is defined by `bubble-risk-weekly-prompt.md` (639 lines) — **that prompt is the source of truth; this file only describes the surrounding mechanics.**
+A twice-weekly (Mon + Thu, Asia/Taipei) market "bubble risk" report in Traditional Chinese. The entire behaviour is defined by `bubble-risk-weekly-prompt.md` — **that prompt is the source of truth; this file only describes the surrounding mechanics.**
 
 This directory is a clone of the prompt repo `moonape1226/bubble-risk-weekly-report-prompt`. A Claude cloud routine fetches the prompt and executes it; reports are written to a **separate** archive repo `moonape1226/bubble-risk-archive` at runtime. No reports are stored here. (Editing the prompt locally and pushing to the prompt repo is ordinary git — the connector-only rule below applies only to how the routine archives reports.)
 
@@ -16,7 +16,7 @@ This directory is a clone of the prompt repo `moonape1226/bubble-risk-weekly-rep
 
 `scripts/fetch_macro.py` (stdlib only) fetches 20 FRED series + `SP500` (200-DMA / 52-week deviation), computes week-over-week deltas vs the prior-run date, and degrades gracefully per series (`ok` / `derived` / `fetch_failed`). It also emits non-FRED blocks: `cftc_lev_funds` (leveraged-fund net position in UST futures, from CFTC's keyless weekly file + current-year history zip), `move_index` (^MOVE via Yahoo's chart JSON endpoint — unofficial, may break), `ofr_repo` (OFR STFM tri-party repo volume, keyless), and a derived `repo_stress` block (SOFR−IORB / SOFR99−IORB spreads date-aligned to the SOFR print + SRF usage `RPONTTLD`). When the prior-run date and the latest valid observation coincide (holiday/weekend runs), it emits `no_new_obs: true` with zero deltas instead of dropping the delta. Usage: `python3 scripts/fetch_macro.py <prior-run-date|none>`.
 
-`scripts/validate_report.py <report.md> [--coverage-rows N]` is the deterministic pre-archive gate (locked 12-section skeleton, exact final disclaimer line, score-JSON schema/arithmetic/tier, §1/§2 bar-vs-score consistency, 總評 line). The routine must re-run it until exit 0 before the connector write.
+`scripts/validate_report.py <report.md> [--coverage-rows N | --prompt <prompt.md>]` is the deterministic pre-archive gate (locked 12-section skeleton, exact final disclaimer line, score-JSON schema/arithmetic/tier — the score block must parse to a JSON object or the run fails, §1/§2 bar-vs-score consistency, §2 five locked anchors, §3 three indicator rows + 結論 trigger-state line, 總評 line cross-checked against §1 Δ and §3 結論; `--prompt` counts the top-level `# Data sources` bullets and enforces the Coverage-table row count). The routine must re-run it until exit 0 before the connector write. Tests: `python3 -m unittest discover -s tests` (also run in CI).
 
 ## Methodology (locked)
 

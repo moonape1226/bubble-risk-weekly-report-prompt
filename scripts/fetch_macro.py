@@ -37,6 +37,11 @@ QUARTERLY_SERIES = {"BOGZ1FL153064486Q"}
 YOY_SERIES = {"CPIAUCSL"}
 WIDE_WINDOW_SERIES = QUARTERLY_SERIES | YOY_SERIES
 
+# Monthly series: FRED keeps an observation in range only while
+# observation_start <= its period END, so a 21-day window silently drops the
+# latest month on late-month runs (publication lag adds more slack needed)
+MONTHLY_SERIES = {"JPNASSETS"}
+
 # Published with a ~1-week lag: the latest observation usually predates the
 # prior-run date, so a pick-vs-PRIOR delta degenerates to no_new_obs / 0.
 # Compute the delta inside the series' own timeline instead (latest vs ~7d
@@ -54,16 +59,20 @@ def _get_bytes(url, timeout=20):
 def _get(url, timeout=20):
     return _get_bytes(url, timeout).decode()
 
+def fetch_window(sid):
+    """(lookback-before-prior, default-back) in days, by series frequency."""
+    if sid in WIDE_WINDOW_SERIES:
+        return 540, 540
+    if sid in MONTHLY_SERIES:
+        return 90, 120
+    return 21, 120
+
 def fred_obs(series_id):
     """Return list of (date, float) desc, newest first. Raises on failure."""
-    lookback = 540 if series_id in WIDE_WINDOW_SERIES else 21
-    default_back = 540 if series_id in WIDE_WINDOW_SERIES else 120
+    lookback, default_back = fetch_window(series_id)
     start = (datetime.now(timezone.utc) - timedelta(days=default_back)).strftime("%Y-%m-%d")
     if PRIOR != "none":
-        try:
-            start = (datetime.strptime(PRIOR, "%Y-%m-%d") - timedelta(days=lookback)).strftime("%Y-%m-%d")
-        except ValueError:
-            pass
+        start = (datetime.strptime(PRIOR, "%Y-%m-%d") - timedelta(days=lookback)).strftime("%Y-%m-%d")
     url = ("https://api.stlouisfed.org/fred/series/observations"
            f"?series_id={series_id}&api_key={FRED_KEY}&file_type=json"
            f"&observation_start={start}&sort_order=desc")
@@ -334,7 +343,30 @@ def ofr_repo():
         res["no_new_obs"] = True
     return res
 
+def derived_t10yie(n, r):
+    """T10YIE fallback from DGS10 - DFII10, both aligned to the older of the
+    two latest dates - mixed-date subtraction would fabricate a level."""
+    as_of = min(n["latest_date"], r["latest_date"])
+    n_al = pick(OBS_CACHE.get("DGS10", []), as_of) or (n["latest_date"], n["latest"])
+    r_al = pick(OBS_CACHE.get("DFII10", []), as_of) or (r["latest_date"], r["latest"])
+    blk = {"status": "derived", "source": "DGS10 - DFII10",
+           "latest_date": as_of, "latest": round(n_al[1] - r_al[1], 3)}
+    if n_al[0] != as_of or r_al[0] != as_of:
+        blk["dgs10_date"], blk["dfii10_date"] = n_al[0], r_al[0]
+    return blk
+
 def main():
+    if PRIOR != "none":
+        # strict ISO check: strptime alone accepts unpadded "2026-7-9", which
+        # would poison the lexicographic date comparisons in pick()
+        try:
+            canonical = datetime.strptime(PRIOR, "%Y-%m-%d").strftime("%Y-%m-%d")
+        except ValueError:
+            canonical = None
+        if canonical != PRIOR:
+            print(f"ERROR: prior_run_date must be 'none' or YYYY-MM-DD, got: {PRIOR}",
+                  file=sys.stderr)
+            sys.exit(2)
     out = {"prior_run_date": PRIOR, "fred_key_present": bool(FRED_KEY),
            "eia_key_present": bool(EIA_KEY), "series": {}}
     for sid, unit in FRED_SERIES.items():
@@ -377,9 +409,7 @@ def main():
     if t.get("status") != "ok":
         n, r = out["series"].get("DGS10", {}), out["series"].get("DFII10", {})
         if n.get("status") == "ok" and r.get("status") == "ok":
-            out["series"]["T10YIE"] = {"status": "derived", "source": "DGS10 - DFII10",
-                                       "latest_date": n["latest_date"],
-                                       "latest": round(n["latest"] - r["latest"], 3)}
+            out["series"]["T10YIE"] = derived_t10yie(n, r)
     # 10Y decomposition (weekly change) if all three have deltas
     d = {}
     for k in ("DGS10", "DFII10", "T10YIE"):
