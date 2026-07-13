@@ -218,6 +218,24 @@ class DecompositionWindow(unittest.TestCase):
         self.assertAlmostEqual(blk["d_t10yie_bps"], 1.0)
         self.assertEqual(blk["driver"], "real-rate")
 
+    def test_all_zero_no_new_obs_is_none_despite_window_mismatch(self):
+        # holiday run: every series stale vs prior (delta 0 by construction),
+        # T10YIE last printed one business day earlier — zero change needs no
+        # window alignment to attribute, so the driver is 無變動, not 不可判
+        series = {
+            "DGS10": {"status": "ok", "latest_date": "2026-07-09",
+                      "prior_date": "2026-07-09", "delta_bps": 0.0,
+                      "no_new_obs": True},
+            "DFII10": {"status": "ok", "latest_date": "2026-07-09",
+                       "prior_date": "2026-07-09", "delta_bps": 0.0,
+                       "no_new_obs": True},
+            "T10YIE": {"status": "ok", "latest_date": "2026-07-08",
+                       "prior_date": "2026-07-08", "delta_bps": 0.0,
+                       "no_new_obs": True},
+        }
+        blk = fm.decomposition_block(series)
+        self.assertEqual(blk["driver"], "none")
+
     def test_direct_t10yie_mismatched_window_keeps_delta_but_unknown_driver(self):
         # 6 ≠ 2 + 20: the direct T10YIE delta covers a different window, so
         # the identity does not hold and the driver must not be judged
