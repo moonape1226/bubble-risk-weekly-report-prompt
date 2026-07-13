@@ -398,19 +398,28 @@ def decomposition_block(series):
     ΔDGS10 − ΔDFII10 is valid only when both legs cover the same window
     (same latest and prior dates); with ΔT10YIE unavailable the driver is
     'unknown' rather than judged from the real leg alone."""
-    n, r = series.get("DGS10", {}), series.get("DFII10", {})
+    n, r, ty = series.get("DGS10", {}), series.get("DFII10", {}), series.get("T10YIE", {})
     d = {k: series.get(k, {}).get("delta_bps") for k in ("DGS10", "DFII10", "T10YIE")}
     if d["DGS10"] is None or d["DFII10"] is None:
         return {"status": "unavailable_no_daily_history"}
     note = "weekly change in bps; computed from daily history"
-    if d["T10YIE"] is None and n.get("latest_date") == r.get("latest_date") \
-            and n.get("prior_date") == r.get("prior_date"):
+    w_n = (n.get("latest_date"), n.get("prior_date"))
+    w_r = (r.get("latest_date"), r.get("prior_date"))
+    w_t = (ty.get("latest_date"), ty.get("prior_date"))
+    rebuilt = False
+    if d["T10YIE"] is None and w_n == w_r:
         d["T10YIE"] = round(d["DGS10"] - d["DFII10"], 1)
+        rebuilt = True
     t = d["T10YIE"]
     if t is None:
         driver = "unknown"
         note += ("; ΔT10YIE unavailable and not rebuilt "
                  "(DGS10/DFII10 windows differ - identity does not hold)")
+    elif not rebuilt and not w_n == w_r == w_t:
+        # a direct ΔT10YIE from a different window breaks the identity too
+        driver = "unknown"
+        note += ("; ΔT10YIE covers a different window than DGS10/DFII10 - "
+                 "driver not judged (identity does not hold across windows)")
     elif not d["DGS10"] and not d["DFII10"] and not t:
         driver = "none"
     elif abs(t) > abs(d["DFII10"]):

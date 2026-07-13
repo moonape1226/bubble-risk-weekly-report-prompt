@@ -198,6 +198,21 @@ class S2AnchorLock(unittest.TestCase):
             "| 1998 LTCM 衝擊 | 90% | ▰▰▰▰▰▰▰▰▰▱ |  |"))
         self.assertEqual(code, 1, out)
 
+    def test_decorated_pct_rejected(self):
+        # cell_int-style loose parsing accepted "40.5%" as 40; the cell must
+        # be exactly <integer>%
+        code, out = run_validator(VALID.replace(
+            "| 1998 LTCM 衝擊 | 40% | ▰▰▰▰▱▱▱▱▱▱ |  |",
+            "| 1998 LTCM 衝擊 | 40.5% | ▰▰▰▰▱▱▱▱▱▱ |  |"))
+        self.assertEqual(code, 1, out)
+
+    def test_decorated_marker_rejected(self):
+        # substring matching accepted "not ◀ 最貼近" as a valid marker
+        code, out = run_validator(VALID.replace(
+            "| 1997 早期建設 | 50% | ▰▰▰▰▰▱▱▱▱▱ | ◀ 最貼近 |",
+            "| 1997 早期建設 | 50% | ▰▰▰▰▰▱▱▱▱▱ | not ◀ 最貼近 |"))
+        self.assertEqual(code, 1, out)
+
     def test_unparseable_pct_cannot_disable_argmax(self):
         # a "—" similarity row must FAIL outright, not silently switch off
         # the marked-is-max check (bypass: 90% on an unmarked anchor + one —)
