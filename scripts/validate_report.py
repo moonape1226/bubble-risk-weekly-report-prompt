@@ -27,6 +27,9 @@ HEADINGS = [
 S1_HEADER = "| 維度 | 條圖 | 本次 | 前次 | Δ |"
 S2_HEADER = "| 錨點 | 相似度 | 條圖 | 標記 |"
 S3_HEADER = "| 指標 | 本次數值 | vs 前次 |"
+ANCHORS = ["1997 早期建設", "1998 LTCM 衝擊", "1999 晚期狂熱",
+           "2000/3 頂點", "2021/12 Meme 頂"]
+S3_INDICATORS = ("S&P 500", "WTI", "10Y")
 FINAL_LINE = "本報告為相對風險溫度計，非擇時訊號。"
 DIMS = [("估值溢價", "valuation"), ("市場廣度", "breadth"), ("投機行為", "speculation"),
         ("散戶情緒", "retail"), ("貨幣與信貸環境", "monetary"), ("結構性槓桿", "structural")]
@@ -70,6 +73,25 @@ def table_rows(lines, header):
     return rows
 
 
+def prompt_bullet_count(path):
+    """Top-level `- ` bullets under `# Data sources` in the prompt file
+    (fenced code blocks and indented sub-bullets excluded)."""
+    n, in_sources, fenced = 0, False, False
+    for line in open(path, encoding="utf-8"):
+        line = line.rstrip("\n")
+        if line.startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if line.startswith("# "):
+            in_sources = line.startswith("# Data sources")
+            continue
+        if in_sources and line.startswith("- "):
+            n += 1
+    return n
+
+
 def check_bar(bar, score, where):
     filled, empty = bar.count("▰"), bar.count("▱")
     if filled + empty != 10:
@@ -83,6 +105,8 @@ def main():
     cov_expected = None
     if "--coverage-rows" in sys.argv:
         cov_expected = int(sys.argv[sys.argv.index("--coverage-rows") + 1])
+    elif "--prompt" in sys.argv:
+        cov_expected = prompt_bullet_count(sys.argv[sys.argv.index("--prompt") + 1])
     text = open(path, encoding="utf-8").read()
     lines = [l.rstrip() for l in text.splitlines()]
     body = [l for l in lines if l.strip()]
@@ -98,7 +122,7 @@ def main():
         report_date = m.group(1)
     if len(body) > 1 and not body[1].startswith("> 報告日期："):
         fail("第二行不是 `> 報告日期：...` meta 行")
-    zy = re.search(r"^\*\*總評\*\*：總分 (\d+)【(低|溫和|警戒|高|極度狂熱)】（Δ [^）]*）；"
+    zy = re.search(r"^\*\*總評\*\*：總分 (\d+)【(低|溫和|警戒|高|極度狂熱)】（Δ ([^）]*)）；"
                    r"扳機狀態：(未擊發|初啟|已擊發)；最貼近錨點：(.+?)（(\d+)%）。$",
                    text, re.M)
     if not zy:
@@ -132,7 +156,7 @@ def main():
 
     # §1 table
     s1 = table_rows(lines, S1_HEADER)
-    s1_scores, s1_total = {}, None
+    s1_scores, s1_total, s1_total_delta = {}, None, None
     if s1 is None:
         fail(f"缺 §1 表頭 `{S1_HEADER}`")
     else:
@@ -151,7 +175,7 @@ def main():
             if score is not None and prev is not None and delta is not None and score - prev != delta:
                 fail(f"§1 {name}: Δ={delta} ≠ 本次{score}−前次{prev}")
             if name == "加權總分":
-                s1_total = score
+                s1_total, s1_total_delta = score, delta
             else:
                 s1_scores[name] = score
 
@@ -161,6 +185,9 @@ def main():
     if s2 is None:
         fail(f"缺 §2 表頭 `{S2_HEADER}`")
     else:
+        names = [r[0].replace("*", "") for r in s2 if r]
+        if names != ANCHORS:
+            fail(f"§2 錨點列應為固定五錨點（依序 {ANCHORS}），實得：{names}")
         marked = [r for r in s2 if len(r) == 4 and "◀ 最貼近" in r[3]]
         if len(marked) != 1:
             fail(f"§2「◀ 最貼近」應恰一列，實得 {len(marked)}")
@@ -177,6 +204,39 @@ def main():
 
     if lines.count(S3_HEADER) != 1:
         fail(f"§3 表頭 `{S3_HEADER}` 應恰出現一次")
+    else:
+        s3 = table_rows(lines, S3_HEADER)
+        if len(s3) != 3:
+            fail(f"§3 應恰 3 列（S&P 500 / WTI / 10Y），實得 {len(s3)} 列")
+        else:
+            for r, key in zip(s3, S3_INDICATORS):
+                if len(r) != 3:
+                    fail(f"§3 欄數 ≠ 3：{r}")
+                elif key not in r[0]:
+                    fail(f"§3 列名應含「{key}」：{r[0]}")
+
+    # §3 結論行：扳機狀態三態，供總評 cross-check
+    s3_trigger = None
+    if "## §3 三角訊號" in lines and "## 六維度評分" in lines:
+        seg = lines[lines.index("## §3 三角訊號"):lines.index("## 六維度評分")]
+        concl = next((l for l in seg if l.replace("*", "").startswith("結論：")), None)
+        if concl is None:
+            fail("§3 缺 `**結論**：` 行")
+        else:
+            m3 = re.search(r"扳機狀態：(未擊發|初啟|已擊發)", concl.replace("*", ""))
+            if not m3:
+                fail(f"§3 結論行缺「扳機狀態：<未擊發/初啟/已擊發>」：{concl[:60]}")
+            else:
+                s3_trigger = m3.group(1)
+
+    # 總評 cross-checks（Δ 對 §1 加權總分列、扳機狀態對 §3 結論）
+    if zy:
+        if s3_trigger and zy.group(4) != s3_trigger:
+            fail(f"總評扳機狀態 {zy.group(4)} ≠ §3 結論 {s3_trigger}")
+        zy_delta = cell_int(zy.group(3))
+        if (zy_delta is None) != (s1_total_delta is None) or (
+                zy_delta is not None and zy_delta != s1_total_delta):
+            fail(f"總評 Δ「{zy.group(3)}」 ≠ §1 加權總分列 Δ {s1_total_delta}")
 
     # score JSON
     jm = re.findall(r"```json\s*\n(.*?)```", text, re.S)
@@ -188,7 +248,11 @@ def main():
             score = json.loads(jm[-1])
         except ValueError as e:
             fail(f"score JSON 無法解析：{e}")
-    if score:
+        else:
+            if not isinstance(score, dict):
+                fail(f"score JSON 應為 JSON 物件（dict），實得：{jm[-1].strip()[:40]!r}")
+                score = None
+    if score is not None:
         if set(score) != JSON_KEYS:
             fail(f"score.json 鍵不符 schema：多 {set(score)-JSON_KEYS}、缺 {JSON_KEYS-set(score)}")
         else:
@@ -227,8 +291,8 @@ def main():
                 if int(zy.group(1)) != score["total"] or zy.group(2) != score["tier"]:
                     fail(f"總評 {zy.group(1)}【{zy.group(2)}】 ≠ score.json "
                          f"{score['total']}【{score['tier']}】")
-                if closest and (zy.group(4) != closest[0] or int(zy.group(5)) != closest[1]):
-                    fail(f"總評錨點 {zy.group(4)}（{zy.group(5)}%） ≠ §2 ◀ 列 "
+                if closest and (zy.group(5) != closest[0] or int(zy.group(6)) != closest[1]):
+                    fail(f"總評錨點 {zy.group(5)}（{zy.group(6)}%） ≠ §2 ◀ 列 "
                          f"{closest[0]}（{closest[1]}%）")
 
     # Coverage table
