@@ -149,6 +149,22 @@ class ScoreJsonFailClosed(unittest.TestCase):
         code, out = run_validator(VALID.replace('"total": 42', '"total": 55'))
         self.assertEqual(code, 1, out)
 
+    def test_boolean_dimension_fails_type_check(self):
+        code, out = run_validator(VALID.replace('"monetary": 40', '"monetary": true'))
+        self.assertEqual(code, 1, out)
+        self.assertIn("score.json monetary=True 非 0-100 整數", out)  # explicit type failure
+
+    def test_string_dimension_fails_cleanly_without_traceback(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                         encoding="utf-8") as f:
+            f.write(VALID.replace('"valuation": 50', '"valuation": "50"'))
+            path = f.name
+        proc = subprocess.run([sys.executable, str(VALIDATOR), path],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn("FAIL", proc.stdout)
+
 
 class S2AnchorLock(unittest.TestCase):
     def test_renamed_anchor_fails(self):
@@ -158,6 +174,32 @@ class S2AnchorLock(unittest.TestCase):
     def test_missing_anchor_fails(self):
         code, out = run_validator(
             VALID.replace("| 2000/3 頂點 | 25% | ▰▰▱▱▱▱▱▱▱▱ |  |\n", ""))
+        self.assertEqual(code, 1, out)
+
+    def test_similarity_above_100_fails(self):
+        code, out = run_validator(VALID.replace(
+            "| 1998 LTCM 衝擊 | 40% | ▰▰▰▰▱▱▱▱▱▱ |  |",
+            "| 1998 LTCM 衝擊 | 105% | ▰▰▰▰▰▰▰▰▰▰ |  |"))
+        self.assertEqual(code, 1, out)
+
+    def test_marked_anchor_must_be_highest(self):
+        # unmarked 1998 raised to 90% while ◀ stays on 1997 at 50%
+        code, out = run_validator(VALID.replace(
+            "| 1998 LTCM 衝擊 | 40% | ▰▰▰▰▱▱▱▱▱▱ |  |",
+            "| 1998 LTCM 衝擊 | 90% | ▰▰▰▰▰▰▰▰▰▱ |  |"))
+        self.assertEqual(code, 1, out)
+
+    def test_tie_break_takes_earlier_row(self):
+        # 1997 and 2021/12 tie at 50%; marking the LATER one violates the
+        # prompt's 同分取表列較前者 rule (總評 kept consistent with the marker)
+        mutated = (VALID
+                   .replace("| 1997 早期建設 | 50% | ▰▰▰▰▰▱▱▱▱▱ | ◀ 最貼近 |",
+                            "| 1997 早期建設 | 50% | ▰▰▰▰▰▱▱▱▱▱ |  |")
+                   .replace("| 2021/12 Meme 頂 | 50% | ▰▰▰▰▰▱▱▱▱▱ |  |",
+                            "| 2021/12 Meme 頂 | 50% | ▰▰▰▰▰▱▱▱▱▱ | ◀ 最貼近 |")
+                   .replace("最貼近錨點：1997 早期建設（50%）。",
+                            "最貼近錨點：2021/12 Meme 頂（50%）。"))
+        code, out = run_validator(mutated)
         self.assertEqual(code, 1, out)
 
 
@@ -208,6 +250,13 @@ class ZongpingCrossChecks(unittest.TestCase):
 class CoverageGate(unittest.TestCase):
     def test_coverage_rows_flag_still_works(self):
         code, out = run_validator(VALID, "--coverage-rows", "5")
+        self.assertEqual(code, 1, out)
+
+    def test_duplicate_coverage_rows_fail(self):
+        # padding the table with copies must not satisfy exactly-once
+        code, out = run_validator(VALID.replace(
+            "| D5 / HY OAS | FRED | ✓ API |",
+            "| D1 / S&P 500 | FRED | ✓ API |"))
         self.assertEqual(code, 1, out)
 
     def test_prompt_flag_count_match_passes(self):

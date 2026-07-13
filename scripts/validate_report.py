@@ -229,6 +229,16 @@ def main():
             check_bar(r[2], pct, f"§2 {r[0]}")
             if pct is not None and pct % 5 != 0:
                 fail(f"§2 {r[0]}: 相似度 {pct}% 非 5% 刻度")
+            if pct is not None and not 0 <= pct <= 100:
+                fail(f"§2 {r[0]}: 相似度 {pct}% 超出 0-100")
+        pcts = [cell_int(r[1]) if len(r) == 4 else None for r in s2]
+        if len(marked) == 1 and pcts and all(p is not None for p in pcts):
+            best_idx = max(range(len(pcts)), key=lambda i: pcts[i])  # first of ties
+            mark_idx = s2.index(marked[0])
+            if mark_idx != best_idx:
+                fail(f"§2「◀ 最貼近」應標最高相似度列（同分取表列較前者）："
+                     f"標記 {s2[mark_idx][0]}（{pcts[mark_idx]}%），"
+                     f"應為 {s2[best_idx][0]}（{pcts[best_idx]}%）")
 
     if lines.count(S3_HEADER) != 1:
         fail(f"§3 表頭 `{S3_HEADER}` 應恰出現一次")
@@ -284,17 +294,25 @@ def main():
         if set(score) != JSON_KEYS:
             fail(f"score.json 鍵不符 schema：多 {set(score)-JSON_KEYS}、缺 {JSON_KEYS-set(score)}")
         else:
+            # type/range gate first: bool is an int subclass and str * int
+            # concatenates, so the arithmetic below runs only on true ints
+            nums_ok = True
             for _, key in DIMS:
                 v = score[key]
-                if not isinstance(v, int) or not 0 <= v <= 100:
+                if type(v) is not int or not 0 <= v <= 100:
                     fail(f"score.json {key}={v!r} 非 0-100 整數")
-            x100 = sum(score[k] * w for k, w in WEIGHTS.items())
-            want_total = (x100 + 50) // 100  # half-up
-            if score["total"] != want_total:
-                fail(f"total={score['total']} ≠ 加權 half-up {want_total}（{x100/100}）")
-            tier = next(t for lo, hi, t in TIERS if lo <= score["total"] <= hi)
-            if score["tier"] != tier:
-                fail(f"tier={score['tier']} ≠ 對照表 {tier}（total {score['total']}）")
+                    nums_ok = False
+            if type(score["total"]) is not int or not 0 <= score["total"] <= 100:
+                fail(f"score.json total={score['total']!r} 非 0-100 整數")
+                nums_ok = False
+            if nums_ok:
+                x100 = sum(score[k] * w for k, w in WEIGHTS.items())
+                want_total = (x100 + 50) // 100  # half-up
+                if score["total"] != want_total:
+                    fail(f"total={score['total']} ≠ 加權 half-up {want_total}（{x100/100}）")
+                tier = next(t for lo, hi, t in TIERS if lo <= score["total"] <= hi)
+                if score["tier"] != tier:
+                    fail(f"tier={score['tier']} ≠ 對照表 {tier}（total {score['total']}）")
             if score["regime"] not in REGIMES:
                 fail(f"regime={score['regime']!r} 不在允許值 {sorted(REGIMES)}")
             if score["timezone"] != "Asia/Taipei":
@@ -332,6 +350,10 @@ def main():
         for r in rows:
             if not any(tok in r[-1] for tok in STATUS_TOKENS):
                 fail(f"Coverage 列缺最終狀態：{r[0]}")
+        firsts = [r[0] for r in rows]
+        dup = sorted({x for x in firsts if firsts.count(x) > 1})
+        if dup:
+            fail(f"Coverage 首欄重複（每個 source bullet 恰一列）：{dup[:5]}")
         if cov_expected is not None and len(rows) != cov_expected:
             fail(f"Coverage 列數 {len(rows)} ≠ 預期 {cov_expected}")
 
