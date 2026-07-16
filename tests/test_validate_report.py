@@ -278,14 +278,18 @@ TRACE_BLOCK = markdown_table(CONTRACT["traceability_header"], [TRACE_ROW])
 
 def anchor_audit(baseline=False):
     hits = {
+        "1973.8",
         "1997.1", "1997.2", "1997.3", "1997.5", "1997.6", "1997.8",
         "1999.10",
     }
     no_data = set()
     if baseline:
-        no_data.update({"1997.7", "1998.2", "1998.7", "1998.8"})
+        no_data.update({
+            "1973.4", "1973.5", "1973.6",
+            "1997.7", "1998.2", "1998.7", "1998.8",
+        })
     else:
-        hits.update({"1997.7", "1998.8"})
+        hits.update({"1973.4", "1997.7", "1998.8"})
     lines = []
     summaries = []
     percentages = {}
@@ -578,6 +582,11 @@ def wti_search_fallback_fixture(marker=None):
     )
     report = replace_once(
         report, raw_row("monetary.wti", "DCOILWTICO") + "\n", ""
+    )
+    report = replace_once(
+        report,
+        "- 1973.5｜未命中｜source_ids=—｜contract feature audit",
+        "- 1973.5｜無資料｜source_ids=—｜contract feature audit",
     )
     fallback_trace = (
         f"| monetary.wti | {marker} | DCOILWTICO current spot search | "
