@@ -90,7 +90,7 @@ class ReportContractTests(unittest.TestCase):
                 len(features), contract["anchor_feature_counts"][anchor]
             )
             feature_ids.extend(feature["id"] for feature in features)
-        self.assertEqual(len(feature_ids), 42)
+        self.assertEqual(len(feature_ids), 50)
         self.assertEqual(len(feature_ids), len(set(feature_ids)))
 
     def test_headers_have_locked_column_counts(self):

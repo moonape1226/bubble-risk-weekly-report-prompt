@@ -345,7 +345,7 @@ Every declared `kind: evidence` trigger reason must be backed by an appendix Raw
 - The final visible line is exactly `本報告為相對風險溫度計，非擇時訊號。`, and it is plain text, not a `##` / `###` heading.
 - §3 的六段解讀對股市 / WTI / 10Y 的方向描述與 §3 表格「vs 前次」欄符號（▲ / ▼ / 持平）一致；三條狀態 bullet 各含本次數值與數字幅度（基準日／方向不可用則用鎖定 wording），衝突時已改為以表格數據為準。
 - §3 依 contract 順序先有 exact `**扳機理由**：<reason codes 以 、 分隔 or none>`，再由 `**結論**` 第一句輸出「扳機狀態：未擊發／初啟／已擊發」三態之一。Reason codes 由量化輸入重算或綁定成功視窗內質化 evidence，與 `score.json.trigger_reasons` exact 一致；狀態為成立 reasons 的最高 severity，且與 `score.json.trigger_state` 及總評一致。D5 `**結論**` 側別與 `score.json.monetary_side` 一致（D5 標「扳機側」→ 扳機狀態至少「初啟」）；三者狀態與 `score.json.regime` 一致。
-- §2 各錨點相似度等於 `## 歷史泡沫週期對比` 同錨點全部 feature-audit 行的「命中數 ÷ contract 分母 × 100」取 `calibration.historical_similarity_step_pct` 最近刻度，並等於五條 exact 摘要。該節首行為 `相似度計算：checklist v2`，含 `2000/3 高位回落條件：是|否`，且每個 contract anchor 都有全數、依序、exact-format 的 feature audit；qualitative 命中都綁定成功且視窗內的 source evidence。Boundary note 依 contract calibration 產生。
+- §2 各錨點相似度等於 `## 歷史泡沫週期對比` 同錨點全部 feature-audit 行的「命中數 ÷ contract 分母 × 100」取 `calibration.historical_similarity_step_pct` 最近刻度，並等於六條 exact 摘要。該節首行為 `相似度計算：checklist v2`，含 `2000/3 高位回落條件：是|否`，且每個 contract anchor 都有全數、依序、exact-format 的 feature audit；qualitative 命中都綁定成功且視窗內的 source evidence。Boundary note 依 contract calibration 產生。
 - §3「10Y 成因拆解」依序列出 ΔDGS10、ΔDFII10、ΔT10YIE；可用腿都是 signed numeric bps，不可用／基準日使用鎖定 wording，partial_stale 仍保留三腿數值並 exact 點名 `stale_series`。ΔT10YIE 優先取自 FRED `T10YIE` 序列歷史，僅在抓取失敗時以 `DGS10 − DFII10` 推算並標 `derived`，且未把任何水位（如 breakeven 水位）當成 Δ 填入。
 - Before final output, iterate all `report_contract.json.sources` objects. The Coverage table must use the exact four-column contract header and contain those exact IDs once each in array order; every status is one allowed contract token, and no `required: true` row uses `✗ NOT DISCLOSED`. Mapping each contract `prompt_match` to one top-level source bullet must also be one-to-one and ordered. Any mismatch makes the report incomplete.
 - 每個 `✓ API` / `✓ DIRECT` / `derived` Coverage 列至少有一列六欄 Raw data 用同一 `source_id`；macro `aggregation: all` 的 same-ID Raw rows 涵蓋每個 required component，`any` 涵蓋每個實際用作 evidence 的 component 且至少一個成功 component。每個 `✓ SEARCH-VERIFIED` Coverage 列至少有一列六欄 traceability 用同一 `source_id`。所有作為計分／事件證據的非零列都依該 source ID 的 contract component window 驗證；7d/14d/30d/90d 的日期必須在視窗內，`same_quarter: true` 還必須與報告日同日曆季；「日期不可見」不得用來支撐 claim。例外僅為 contract-eligible `✓ SEARCH-VERIFIED（0 件）`：URL／發布日期可為 `—`，query、檢查來源、timestamp 仍必填。
@@ -544,23 +544,24 @@ Assign the tier strictly from this table (e.g. 62 → 警戒). The cutoffs are c
 
 **相似度計算（決定性 checklist，取代自由評估）：** 每個錨點的 feature ID、順序、決定性規則、證據 source IDs 與分母均取自 `report_contract.json`；不可手填、自由評估或跳過缺值項。先依本次六維度分數、macro/current/prior state 與附錄證據重算每個 feature，再以「命中」數 ÷ contract 分母 × 100，四捨五入到 `calibration.historical_similarity_step_pct` 的最近刻度（目前 5%）。同分時取 contract anchor 順序較前者標「◀ 最貼近」。「無資料」不計入命中數，但仍保留在 contract 分母。
 
-本節第一行固定為 `相似度計算：checklist v2`。緊接著依 contract anchor 順序輸出五條可稽核摘要，每個錨點恰一條，格式固定且行尾不得加 detail：`- <錨點>：命中 <X>/<N> = <P>%`。`X` 必須由下方該錨點的全部 feature-audit 行重算，`N` 必須等於 contract 分母，`P` 必須等於 `X/N×100` 取 contract 刻度，並與 §2 同錨點表列一致。五條後輸出 contract `historical_audit_labels` 要求的 `2000/3 高位回落條件：是|否`。
+本節第一行固定為 `相似度計算：checklist v2`。緊接著依 contract anchor 順序輸出六條可稽核摘要，每個錨點恰一條，格式固定且行尾不得加 detail：`- <錨點>：命中 <X>/<N> = <P>%`。`X` 必須由下方該錨點的全部 feature-audit 行重算，`N` 必須等於 contract 分母，`P` 必須等於 `X/N×100` 取 contract 刻度，並與 §2 同錨點表列一致。六條後輸出 contract `historical_audit_labels` 要求的 `2000/3 高位回落條件：是|否`。
 
-接著必須輸出**所有五個錨點的全部 feature audit**，不得只列最貼近錨點。每個錨點先輸出 `**<錨點> feature audit**`，再依 contract feature 順序輸出恰好 `anchor_feature_counts[<錨點>]` 行，每行 exact format：
+接著必須輸出**所有六個錨點的全部 feature audit**，不得只列最貼近錨點。每個錨點先輸出 `**<錨點> feature audit**`，再依 contract feature 順序輸出恰好 `anchor_feature_counts[<錨點>]` 行，每行 exact format：
 
 `- <feature_id>｜<命中|未命中|無資料>｜source_ids=<comma-separated contract source IDs|—>｜<detail>`
 
-Machine-rule features 由 validator 直接用 score/macro/prior 重算，`detail` 只能解釋輸入，不能改寫結果。純 machine-derived 且不需外部證據的 feature 可用 `source_ids=—`。Qualitative feature 只能在其 contract-required source IDs 具成功 Coverage token，且同 ID Raw data / traceability 有視窗內證據時標「命中」；成功證據顯示條件不成立時標「未命中」，證據缺失、過期、`⛔` 或 `✗` 時標「無資料」。Validator 必須由這些行重算五條摘要、§2 百分比與最貼近標記；報告不得自行調整命中數。
+Machine-rule features 由 validator 直接用 score/macro/prior 重算，`detail` 只能解釋輸入，不能改寫結果。純 machine-derived 且不需外部證據的 feature 可用 `source_ids=—`。Qualitative feature 只能在其 contract-required source IDs 具成功 Coverage token，且同 ID Raw data / traceability 有視窗內證據時標「命中」；成功證據顯示條件不成立時標「未命中」，證據缺失、過期、`⛔` 或 `✗` 時標「無資料」。Validator 必須由這些行重算六條摘要、§2 百分比與最貼近標記；報告不得自行調整命中數。
 
 **錨點特徵清單（每項 1 分，等權；「扳機狀態」見 §3 結論的判定規則）：**
 
+- **1973/1 Nifty Fifty 頂**（8 項）：①估值溢價 ≥ 80（quality-at-any-price 溢價）；②市場廣度 ≥ 60（one-decision 窄領導）；③CPI YoY ≥ 4%（`CPIAUCSL` `yoy_pct`）；④通膨預期未回落（`T5YIFR` 週 Δ ≥ 0 bps）；⑤WTI 週漲幅 ≥ +0.5%（`DCOILWTICO` `chg_pct`，即方向 ▲）；⑥breakeven 主導的 10Y 上行（`decomposition.driver == "breakeven"` 且 ΔDGS10 > 0，同 2000/3 ⑧ 的子規則）；⑦扳機狀態 ≥ 初啟；⑧散戶情緒 < 55（1973/1 頂為機構主導的 one-decision 行情，散戶未狂熱——與 1999／2021 錨互斥的刻意區分器）
 - **1997 早期建設**（8 項）：①估值溢價 40–74；②市場廣度 < 45；③投機行為 < 50；④hyperscaler capex 指引仍上修；⑤散戶情緒 < 55；⑥結構性槓桿 < 50；⑦HY OAS < 4% 且本次未走闊；⑧扳機狀態＝未擊發
 - **1998 LTCM 衝擊**（8 項）：①HY OAS 週 Δ ≥ +30 bps 或 VIX > 25；②S&P 500 較前次回檔 ≥ 5%（`sp500_trend.chg_pct ≤ −5`）；③具名非銀／槓桿機構壓力事件披露（私募信貸 gate、對沖基金爆雷）；④Fed 路徑轉鴿（FedWatch 隱含寬鬆或實際降息）；⑤估值溢價 ≥ 60；⑥扳機狀態 ≥ 初啟；⑦市場廣度本次 Δ ≥ +8（急轉弱）；⑧ΔT10YIE ≤ 0（通膨預期非主因）
 - **1999 晚期狂熱**（10 項）：①估值溢價 ≥ 75；②CAPE ≥ 38；③投機行為 ≥ 60；④本週 moonshot ≥ 1 或無營收 IPO 佔比偏高；⑤市場廣度 ≥ 45（轉窄）；⑥D5 落自滿側且 HY OAS < 3.5%；⑦結構性槓桿 ≥ 60；⑧散戶情緒 ≥ 55；⑨巨型 IPO pipeline 活躍（30 日內具名 S-1 / 定價）；⑩扳機狀態＝未擊發
 - **2000/3 頂點**（8 項）：①估值溢價 ≥ 85；②扳機狀態 ≥ 初啟；③市場廣度 ≥ 60（極窄）；④（prior `score.json.sp500_dev200_pct > calibration.sp500_high_deviation_pct`，目前即 >10，且 current `score.json.sp500_dev200_pct` 為數字且 `< prior`），或 S&P 500 較前次回檔 ≥ 5%（current `sp500_trend.chg_pct ≤ −5`）；legacy/null prior 使第一分支為否；⑤投機行為 ≥ 70；⑥insider 集中賣出（14 日內合格 Form 4 cluster ≥ 1）；⑦散戶情緒 ≥ 65；⑧貨幣轉緊（FedWatch 隱含緊縮、或 ΔT10YIE 主導的 10Y 上行）
 - **2021/12 Meme 頂**（8 項）：①散戶情緒 ≥ 65；②社群投機熱（WSB / cashtag 本週有具名標的）；③結構性槓桿 ≥ 65；④流動性氾濫（央行資產負債表擴張且 D5 ≥ 60 落自滿側）；⑤margin debt YoY ≥ +40%；⑥本週 microcap moonshot ≥ 1；⑦市場廣度 ≥ 50（指數與廣度背離）；⑧CPI YoY ≥ 4% 且 Fed 尚未實質緊縮
 
-Then provide a 2-sentence interpretation: which historical phase does the current week most resemble, and what does that imply about position in the cycle? The similarity assessment should include the 結構性槓桿 dimension, especially for 1999 / 2000 March / 2021 December comparisons. Interpret 結構性槓桿 in period-adjusted terms rather than requiring identical instruments: for 1999 / 2000 March, use proxies such as margin debt, index futures / options speculation, and retail leverage; for 2021 December, use meme leverage, options / 0DTE where available, and leveraged product adoption.
+Then provide a 2-sentence interpretation: which historical phase does the current week most resemble, and what does that imply about position in the cycle? 例外：當「1973/1 Nifty Fifty 頂」為最貼近錨時，解讀為**政權訊號**（通膨制約下的窄領導頂部組態），而非科技泡沫週期相位；其餘五錨仍回答「循環位置」。此解讀的扳機措辭必須跟隨機器判定、不得與 §3 矛盾：僅當 1973.6 命中或 §3 扳機理由含 `breakeven_wti_up` 時才可述「扳機鏈 A 啟動」；僅當 1973.3 與 1973.4 均命中時才可引 CPI YoY／5y5y forward 述「Fed 寬鬆空間受壓縮」；上述條件皆不成立時（例如僅 ①②③④⑤⑧ 命中而扳機狀態＝未擊發），只述估值／廣度／通膨背景／散戶結構的組態相似，並明述「扳機鏈 A 尚未驗證啟動」。 The similarity assessment should include the 結構性槓桿 dimension, especially for 1999 / 2000 March / 2021 December comparisons. Interpret 結構性槓桿 in period-adjusted terms rather than requiring identical instruments: for 1999 / 2000 March, use proxies such as margin debt, index futures / options speculation, and retail leverage; for 2021 December, use meme leverage, options / 0DTE where available, and leveraged product adoption.
 
 In addition, the S&P 500 price-trend deviation may be cited as a cross-period anchor (Farrell rules #1/#2): the weekly 200-day / 52-week MA deviation from `sp500_trend`, plus the long-horizon deviation-from-exponential-growth-trend reference values (Dot-com ≈95%, 1929 ≈110%, current AI cycle ≈147%; source: RIA/Farrell article). Use these as narrative similarity context, not as a recomputed weekly scoring input — the weekly deviation is scored under 估值溢價.
 
@@ -715,6 +716,7 @@ This subsection defines how §1 / §2 / §3 must be rendered. They appear at the
 
 | 錨點 | 相似度 | 條圖 | 標記 |
 |---|---:|---|---|
+| 1973/1 Nifty Fifty 頂 | 15% | ▰▱▱▱▱▱▱▱▱▱ |  |
 | 1997 早期建設 | 25% | ▰▰▱▱▱▱▱▱▱▱ |  |
 | 1998 LTCM 衝擊 | 25% | ▰▰▱▱▱▱▱▱▱▱ |  |
 | 1999 晚期狂熱 | 50% | ▰▰▰▰▰▱▱▱▱▱ | ◀ 最貼近 |
