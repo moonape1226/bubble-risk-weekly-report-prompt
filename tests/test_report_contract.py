@@ -252,6 +252,86 @@ class ReportContractTests(unittest.TestCase):
             self.assertIn(reason["kind"], {"machine", "evidence"})
             self.assertLessEqual(set(reason.get("source_ids", [])), source_ids)
 
+    def test_spv_deal_marker_shape_is_valid(self):
+        marker = self.contract["spv_deal_marker"]
+        source_ids = {source["id"] for source in self.contract["sources"]}
+        self.assertIn(marker["source_id"], source_ids)
+        source = next(
+            item for item in self.contract["sources"]
+            if item["id"] == marker["source_id"]
+        )
+        self.assertEqual(source["window"], "composite")
+        self.assertIn(
+            marker["component_id"],
+            {item["id"] for item in source["window_components"]},
+        )
+        self.assertRegex(marker["tag"], r"^\[[a-z_]+\]$")
+        evidence_tags = {
+            reason["evidence_tag"]
+            for reason in self.contract["trigger_reason_codes"].values()
+            if reason["kind"] == "evidence"
+        }
+        self.assertNotIn(marker["tag"], evidence_tags)
+        self.assertTrue(marker["required_keys"])
+        self.assertTrue(all(
+            re.fullmatch(r"[a-z_]+", key) for key in marker["required_keys"]
+        ))
+        self.assertEqual(
+            len(marker["required_keys"]), len(set(marker["required_keys"]))
+        )
+
+    def test_contract_rejects_spv_deal_marker_when_source_window_is_not_composite(self):
+        spec = importlib.util.spec_from_file_location(
+            "validate_report_spv_marker_composite_test", VALIDATOR_PATH
+        )
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+        contract = copy.deepcopy(self.contract)
+        marker = contract["spv_deal_marker"]
+        source = next(
+            item for item in contract["sources"] if item["id"] == marker["source_id"]
+        )
+        source["window"] = "30d"  # window_components deliberately left stale
+        failures = validator.Failures()
+        self.assertFalse(
+            validator.validate_contract(contract, failures), failures.items
+        )
+        self.assertTrue(any(
+            "composite" in message for message in failures.items
+        ), failures.items)
+
+    def test_contract_rejects_spv_deal_marker_on_non_event_component(self):
+        spec = importlib.util.spec_from_file_location(
+            "validate_report_spv_marker_component_test", VALIDATOR_PATH
+        )
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+        contract = copy.deepcopy(self.contract)
+        contract["spv_deal_marker"]["component_id"] = "quarterly_state"
+        failures = validator.Failures()
+        self.assertFalse(
+            validator.validate_contract(contract, failures), failures.items
+        )
+        self.assertTrue(any(
+            "30d" in message for message in failures.items
+        ), failures.items)
+
+    def test_contract_rejects_spv_deal_marker_with_empty_keywords(self):
+        spec = importlib.util.spec_from_file_location(
+            "validate_report_spv_marker_keywords_test", VALIDATOR_PATH
+        )
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+        contract = copy.deepcopy(self.contract)
+        contract["spv_deal_marker"]["keywords"] = []
+        failures = validator.Failures()
+        self.assertFalse(
+            validator.validate_contract(contract, failures), failures.items
+        )
+        self.assertTrue(any(
+            "keywords" in message for message in failures.items
+        ), failures.items)
+
     def test_source_and_state_enums_are_unique(self):
         for key in (
             "anchors",
