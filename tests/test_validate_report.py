@@ -1216,6 +1216,12 @@ class SpvDealMarkerTests(ValidatorCase):
             event_item="[event_scan] SPV sale-leaseback financing disclosed"
         ))
 
+    def test_untagged_row_with_jv_keyword_fails(self):
+        self.assert_fails(report=spv_deal_marker_fixture(
+            event_item="[event_scan] JV vehicle with third-party majority "
+                       "equity financing disclosed"
+        ))
+
     def test_last_pair_missing_terminator_fails(self):
         item = spv_event_item()
         assert item.endswith(";")

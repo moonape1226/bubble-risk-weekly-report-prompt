@@ -135,7 +135,7 @@
     "term_premium_funding": {"state": "初啟", "kind": "machine"},
     "basis_extreme_move": {"state": "初啟", "kind": "evidence", "source_ids": ["structural.treasury_basis_trade"], "evidence_tag": "[basis_extreme_move]", "window": "7d", "prerequisite": {"type": "all", "rules": [{"type": "macro_compare", "path": ["cftc_lev_funds", "net_contracts"], "op": "lt", "value": 0}, {"type": "macro_compare", "path": ["move_index", "delta_abs"], "op": "gt", "value": 0}]}}
   },
-  "spv_deal_marker": {"source_id": "ai.hyperscaler_financing_mix", "component_id": "event_scan", "tag": "[spv_deal]", "required_keys": ["sponsor_equity_split", "residual_value_guarantee", "lease_term", "debt_tenor", "lead_lenders"], "keywords": ["spv", "special purpose", "special-purpose", "off-balance", "sale-leaseback", "表外", "售後回租", "特殊目的"]},
+  "spv_deal_marker": {"source_id": "ai.hyperscaler_financing_mix", "component_id": "event_scan", "tag": "[spv_deal]", "required_keys": ["sponsor_equity_split", "residual_value_guarantee", "lease_term", "debt_tenor", "lead_lenders"], "keywords": ["spv", "jv", "joint venture", "joint-venture", "special purpose", "special-purpose", "project finance", "project-finance", "off-balance", "off balance", "sale-leaseback", "sale leaseback", "表外", "售後回租", "特殊目的", "合資"]},
   "anchor_features": {
     "1973/1 Nifty Fifty 頂": [
       {"id": "1973.1", "rule": {"type": "score_gte", "key": "valuation", "value": 80}},
