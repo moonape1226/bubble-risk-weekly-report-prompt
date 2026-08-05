@@ -1187,6 +1187,28 @@ class SpvDealMarkerTests(ValidatorCase):
         )
         self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
 
+    def test_key_nested_in_preceding_value_fails(self):
+        # No standalone lease_term= token exists here -- it only appears
+        # unseparated inside residual_value_guarantee's captured value, at a
+        # position that still satisfies the exactly-once and ordering checks.
+        marker = CONTRACT["spv_deal_marker"]
+        item = (
+            f"[{marker['component_id']}]{marker['tag']} SPV deal "
+            "sponsor_equity_split=60/40;"
+            "residual_value_guarantee=undisclosed lease_term=15y;"
+            "debt_tenor=7y;lead_lenders=Bank A;"
+        )
+        self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
+
+    def test_missing_semicolon_between_pairs_fails(self):
+        marker = CONTRACT["spv_deal_marker"]
+        item = (
+            f"[{marker['component_id']}]{marker['tag']} SPV deal "
+            "sponsor_equity_split=60/40;residual_value_guarantee=undisclosed;"
+            "lease_term=15y debt_tenor=7y;lead_lenders=Bank A;"
+        )
+        self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
+
 
 class HistoricalEvidenceSemantics(ValidatorCase):
     def test_missing_qualitative_evidence_cannot_be_declared_miss(self):

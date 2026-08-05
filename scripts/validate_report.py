@@ -3225,7 +3225,7 @@ def validate_spv_deal_rows(rows, marker, where, failures):
                 f"{marker['source_id']}/{marker['component_id']} rows: {row}"
             )
             continue
-        positions = []
+        found = []
         all_present = True
         for key in marker["required_keys"]:
             matches = list(re.finditer(
@@ -3243,11 +3243,23 @@ def validate_spv_deal_rows(rows, marker, where, failures):
                 )
                 all_present = False
                 continue
-            positions.append(matches[0].start())
-        if all_present and positions != sorted(positions):
-            failures.add(
-                f"{where} spv_deal marker on {row[0]} attributes are not in contract order"
-            )
+            found.append((key, matches[0]))
+        if all_present:
+            positions = [match.start() for _, match in found]
+            if positions != sorted(positions):
+                failures.add(
+                    f"{where} spv_deal marker on {row[0]} attributes are not in contract order"
+                )
+            # A key token landing inside another key's captured value means the
+            # pairs are not ;-separated tokens (e.g. "residual_value_guarantee=
+            # undisclosed lease_term=15y;" carries no standalone lease_term=).
+            for outer_key, outer in found:
+                for inner_key, inner in found:
+                    if inner is not outer and outer.start() < inner.start() < outer.end():
+                        failures.add(
+                            f"{where} spv_deal marker on {row[0]} attribute "
+                            f"{inner_key} is nested inside the value of {outer_key}"
+                        )
 
 
 def validate_appendix(doc, report_day, macro, contract, failures):
