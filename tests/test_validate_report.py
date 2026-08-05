@@ -646,6 +646,55 @@ def ig_oas_search_fallback_fixture(marker, bullet_value):
     return report, macro
 
 
+def spv_event_item(omit=(), **overrides):
+    marker = CONTRACT["spv_deal_marker"]
+    values = {
+        "sponsor_equity_split": "60/40",
+        "residual_value_guarantee": "undisclosed",
+        "lease_term": "15y",
+        "debt_tenor": "7y",
+        "lead_lenders": "Bank A, Bank B",
+    }
+    values.update(overrides)
+    pairs = "".join(
+        f"{key}={values[key]};" for key in marker["required_keys"] if key not in omit
+    )
+    return f"[{marker['component_id']}]{marker['tag']} SPV data-center financing deal {pairs}"
+
+
+def spv_deal_marker_fixture(event_item=None):
+    marker = CONTRACT["spv_deal_marker"]
+    source = next(s for s in CONTRACT["sources"] if s["id"] == marker["source_id"])
+    other_component = next(
+        c["id"] for c in source["window_components"] if c["id"] != marker["component_id"]
+    )
+    quarterly_row = (
+        f"| {marker['source_id']} | [{other_component}] top-5 capex vs FCF | "
+        "hyperscaler quarterly financing state | "
+        "https://example.com/hyperscaler-financing-quarterly | "
+        f"2026-07-01 | {TIMESTAMP} |"
+    )
+    event_row = (
+        f"| {marker['source_id']} | {event_item or spv_event_item()} | "
+        "SPV financing event scan | https://example.com/hyperscaler-financing-spv | "
+        f"2026-07-12 | {TIMESTAMP} |"
+    )
+    report = make_report()
+    coverage = coverage_row(marker["source_id"])
+    report = replace_once(
+        report, coverage,
+        coverage.replace(
+            "✗ NOT DISCLOSED components="
+            "quarterly_state:not_disclosed,event_scan:not_disclosed",
+            "✓ SEARCH-VERIFIED components=quarterly_state:ok,event_scan:ok",
+        ),
+    )
+    report = replace_once(
+        report, TRACE_ROW, TRACE_ROW + "\n" + quarterly_row + "\n" + event_row
+    )
+    return report
+
+
 class ValidatorCase(unittest.TestCase):
     def run_validator(
         self,
@@ -1059,6 +1108,84 @@ class CoverageAndTraceability(ValidatorCase):
         self.assert_fails(report=replace_once(
             make_report(), row, row.replace(TIMESTAMP, "2099-01-01T00:00:00+00:00")
         ))
+
+
+class SpvDealMarkerTests(ValidatorCase):
+    def test_tagged_row_with_all_attributes_passes(self):
+        self.assert_passes(report=spv_deal_marker_fixture())
+
+    def test_tagged_row_missing_a_required_key_fails(self):
+        report = spv_deal_marker_fixture(
+            event_item=spv_event_item(omit=["debt_tenor"])
+        )
+        self.assert_fails(report=report)
+
+    def test_tagged_row_with_empty_value_fails(self):
+        report = spv_deal_marker_fixture(
+            event_item=spv_event_item(lease_term=" ")
+        )
+        self.assert_fails(report=report)
+
+    def test_tag_on_quarterly_state_row_fails(self):
+        report = spv_deal_marker_fixture()
+        report = replace_once(
+            report,
+            "[quarterly_state] top-5 capex vs FCF",
+            "[quarterly_state][spv_deal] top-5 capex vs FCF",
+        )
+        self.assert_fails(report=report)
+
+    def test_tag_on_a_different_sources_row_fails(self):
+        report = spv_deal_marker_fixture()
+        report = replace_once(
+            report, TRACE_ROW,
+            TRACE_ROW.replace("AI rename scan", "AI rename scan [spv_deal]"),
+        )
+        self.assert_fails(report=report)
+
+    def test_untagged_event_scan_row_without_attributes_passes(self):
+        report = spv_deal_marker_fixture(event_item="[event_scan] large bond financing disclosed")
+        self.assert_passes(report=report)
+
+    def test_substring_key_impostor_is_rejected(self):
+        # sublease_term= must not satisfy the lease_term= requirement, and
+        # non_debt_tenor= must not satisfy debt_tenor= -- no unanchored
+        # substring match may stand in for the real key.
+        marker = CONTRACT["spv_deal_marker"]
+        item = (
+            f"[{marker['component_id']}]{marker['tag']} SPV deal "
+            "sublease_term=15y;non_debt_tenor=7y;"
+            "sponsor_equity_split=60/40;residual_value_guarantee=undisclosed;"
+            "lead_lenders=Bank A;"
+        )
+        self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
+
+    def test_reversed_order_attributes_fails(self):
+        marker = CONTRACT["spv_deal_marker"]
+        values = {
+            "sponsor_equity_split": "60/40",
+            "residual_value_guarantee": "undisclosed",
+            "lease_term": "15y",
+            "debt_tenor": "7y",
+            "lead_lenders": "Bank A, Bank B",
+        }
+        pairs = "".join(
+            f"{key}={values[key]};" for key in reversed(marker["required_keys"])
+        )
+        item = f"[{marker['component_id']}]{marker['tag']} SPV deal {pairs}"
+        self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
+
+    def test_duplicated_attribute_key_fails(self):
+        item = spv_event_item() + "lease_term=20y;"
+        self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
+
+    def test_uppercase_tag_variant_fails(self):
+        marker = CONTRACT["spv_deal_marker"]
+        item = (
+            f"[{marker['component_id']}]{marker['tag'].upper()} "
+            "SPV deal with zero recorded attributes at all"
+        )
+        self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
 
 
 class HistoricalEvidenceSemantics(ValidatorCase):

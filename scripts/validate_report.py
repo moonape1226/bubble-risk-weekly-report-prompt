@@ -178,7 +178,7 @@ def validate_contract(contract, failures):
         "triangle_labels", "triangle_fallbacks", "dimension_required_inputs",
         "triangle_chain_inputs", "historical_audit_labels",
         "direction_thresholds", "calibration", "trigger_reason_codes",
-        "anchor_features", "score_schema",
+        "spv_deal_marker", "anchor_features", "score_schema",
         "coverage_statuses", "section1_header", "section2_header",
         "section3_header", "weighted_score_header", "coverage_header",
         "raw_data_header", "traceability_header", "sources",
@@ -391,6 +391,34 @@ def validate_contract(contract, failures):
         ]
         if len(evidence_tags) != len(set(evidence_tags)):
             failures.add("trigger evidence tags are not unique")
+
+        spv_marker = contract["spv_deal_marker"]
+        if not isinstance(spv_marker, dict) or set(spv_marker) != {
+                "source_id", "component_id", "tag", "required_keys"}:
+            failures.add("contract spv_deal_marker is invalid")
+        else:
+            marker_source = next(
+                (source for source in contract["sources"]
+                 if source["id"] == spv_marker.get("source_id")),
+                None,
+            )
+            if marker_source is None:
+                failures.add("contract spv_deal_marker source_id is unknown")
+            elif marker_source.get("window") != "composite":
+                failures.add("contract spv_deal_marker source is not a composite source")
+            elif spv_marker.get("component_id") not in {
+                    item.get("id") for item in marker_source.get("window_components", [])}:
+                failures.add("contract spv_deal_marker component_id is invalid")
+            if not re.fullmatch(r"\[[a-z_]+\]", spv_marker.get("tag", "")):
+                failures.add("contract spv_deal_marker lacks a stable tag")
+            elif spv_marker["tag"] in evidence_tags:
+                failures.add("contract spv_deal_marker tag collides with a trigger evidence_tag")
+            required_keys = spv_marker.get("required_keys")
+            if (not isinstance(required_keys, list) or not required_keys
+                    or any(not isinstance(key, str) or not re.fullmatch(r"[a-z_]+", key)
+                           for key in required_keys)
+                    or len(required_keys) != len(set(required_keys))):
+                failures.add("contract spv_deal_marker required_keys is invalid")
 
         score_keys = {dimension["key"] for dimension in dimensions}
         macro_roots = {"series", *macro_schema["required_blocks"]}
@@ -3169,6 +3197,59 @@ def macro_component_evidence_fields(component, block):
     return primary, fields
 
 
+def validate_spv_deal_rows(rows, marker, where, failures):
+    """Conditionally enforce required attributes on a tagged SPV deal row.
+
+    A row is only inspected when its item cell contains the contract's
+    ``spv_deal_marker`` tag (matched case-insensitively); untagged rows are
+    never checked (same conditional-enforcement philosophy as trigger
+    ``evidence_tag``). A case-variant of the exact tag is rejected outright
+    -- it would otherwise read as tagged to a human but silently skip every
+    check below, since the case-sensitive gate would treat it as absent.
+    """
+    tag = marker["tag"]
+    prefix = f"[{marker['component_id']}]{tag}"
+    for row in rows:
+        item = row[1] if len(row) > 1 else ""
+        tag_match = re.search(re.escape(tag), item, re.IGNORECASE)
+        if not tag_match:
+            continue
+        if tag_match.group(0) != tag:
+            failures.add(
+                f"{where} spv_deal marker must use the exact-case tag {tag}: {row}"
+            )
+            continue
+        if row[0] != marker["source_id"] or not item.startswith(prefix):
+            failures.add(
+                f"{where} spv_deal marker {tag} may only appear on "
+                f"{marker['source_id']}/{marker['component_id']} rows: {row}"
+            )
+            continue
+        positions = []
+        all_present = True
+        for key in marker["required_keys"]:
+            matches = list(re.finditer(
+                rf"(?<![A-Za-z0-9_]){re.escape(key)}=([^;|]*)", item
+            ))
+            if len(matches) > 1:
+                failures.add(
+                    f"{where} spv_deal marker on {row[0]} has duplicate attribute {key}"
+                )
+                all_present = False
+                continue
+            if len(matches) != 1 or not matches[0].group(1).strip():
+                failures.add(
+                    f"{where} spv_deal marker on {row[0]} missing required attribute {key}"
+                )
+                all_present = False
+                continue
+            positions.append(matches[0].start())
+        if all_present and positions != sorted(positions):
+            failures.add(
+                f"{where} spv_deal marker on {row[0]} attributes are not in contract order"
+            )
+
+
 def validate_appendix(doc, report_day, macro, contract, failures):
     raw_section = doc.subsection_lines("### Raw data", "## 數據附錄")
     coverage_section = doc.subsection_lines("### Coverage", "## 數據附錄")
@@ -3184,6 +3265,8 @@ def validate_appendix(doc, report_day, macro, contract, failures):
     trace_rows = find_table(
         trace_section, contract["traceability_header"], "traceability", failures
     )
+    validate_spv_deal_rows(raw_rows, contract["spv_deal_marker"], "raw data", failures)
+    validate_spv_deal_rows(trace_rows, contract["spv_deal_marker"], "traceability", failures)
     sources = contract["sources"]
     source_by_id = {source["id"]: source for source in sources}
     raw_by_id = {}
