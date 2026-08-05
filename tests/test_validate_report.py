@@ -1216,6 +1216,23 @@ class SpvDealMarkerTests(ValidatorCase):
             event_item="[event_scan] SPV sale-leaseback financing disclosed"
         ))
 
+    def test_spv_keyword_on_other_source_row_is_not_blocked(self):
+        # Deliberate scope decision: SPV keywords plus a hyperscaler name on
+        # another source's row stay valid -- structural.ai_infrastructure_debt
+        # legitimately records neocloud sale-leaseback deals whose disclosed
+        # backing names a hyperscaler as customer, and tenant-vs-customer is
+        # not machine-decidable from free text. Routing lives in the prompt.
+        report = spv_deal_marker_fixture()
+        report = replace_once(
+            report, TRACE_ROW,
+            TRACE_ROW.replace(
+                "AI rename scan",
+                "AI rename scan; CoreWeave sale-leaseback SPV backed by "
+                "Microsoft capacity commitments",
+            ),
+        )
+        self.assert_passes(report=report)
+
     def test_untagged_row_with_jv_keyword_fails(self):
         self.assert_fails(report=spv_deal_marker_fixture(
             event_item="[event_scan] JV vehicle with third-party majority "
