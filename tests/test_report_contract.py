@@ -300,6 +300,22 @@ class ReportContractTests(unittest.TestCase):
             "composite" in message for message in failures.items
         ), failures.items)
 
+    def test_contract_rejects_spv_deal_marker_on_non_event_component(self):
+        spec = importlib.util.spec_from_file_location(
+            "validate_report_spv_marker_component_test", VALIDATOR_PATH
+        )
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+        contract = copy.deepcopy(self.contract)
+        contract["spv_deal_marker"]["component_id"] = "quarterly_state"
+        failures = validator.Failures()
+        self.assertFalse(
+            validator.validate_contract(contract, failures), failures.items
+        )
+        self.assertTrue(any(
+            "30d" in message for message in failures.items
+        ), failures.items)
+
     def test_source_and_state_enums_are_unique(self):
         for key in (
             "anchors",

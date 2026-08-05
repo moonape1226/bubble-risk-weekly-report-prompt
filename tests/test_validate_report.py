@@ -1200,6 +1200,11 @@ class SpvDealMarkerTests(ValidatorCase):
         )
         self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
 
+    def test_last_pair_missing_terminator_fails(self):
+        item = spv_event_item()
+        assert item.endswith(";")
+        self.assert_fails(report=spv_deal_marker_fixture(event_item=item[:-1]))
+
     def test_missing_semicolon_between_pairs_fails(self):
         marker = CONTRACT["spv_deal_marker"]
         item = (

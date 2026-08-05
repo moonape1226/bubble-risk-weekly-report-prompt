@@ -406,9 +406,18 @@ def validate_contract(contract, failures):
                 failures.add("contract spv_deal_marker source_id is unknown")
             elif marker_source.get("window") != "composite":
                 failures.add("contract spv_deal_marker source is not a composite source")
-            elif spv_marker.get("component_id") not in {
-                    item.get("id") for item in marker_source.get("window_components", [])}:
-                failures.add("contract spv_deal_marker component_id is invalid")
+            else:
+                marker_component = next(
+                    (item for item in marker_source.get("window_components", [])
+                     if item.get("id") == spv_marker.get("component_id")),
+                    None,
+                )
+                if marker_component is None:
+                    failures.add("contract spv_deal_marker component_id is invalid")
+                elif marker_component.get("window") != "30d":
+                    failures.add(
+                        "contract spv_deal_marker component is not a 30d event scan"
+                    )
             if not re.fullmatch(r"\[[a-z_]+\]", spv_marker.get("tag", "")):
                 failures.add("contract spv_deal_marker lacks a stable tag")
             elif spv_marker["tag"] in evidence_tags:
@@ -3240,6 +3249,13 @@ def validate_spv_deal_rows(rows, marker, where, failures):
             if len(matches) != 1 or not matches[0].group(1).strip():
                 failures.add(
                     f"{where} spv_deal marker on {row[0]} missing required attribute {key}"
+                )
+                all_present = False
+                continue
+            if matches[0].end() >= len(item) or item[matches[0].end()] != ";":
+                failures.add(
+                    f"{where} spv_deal marker on {row[0]} attribute {key} "
+                    "is not terminated by ';'"
                 )
                 all_present = False
                 continue
