@@ -1200,6 +1200,22 @@ class SpvDealMarkerTests(ValidatorCase):
         )
         self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
 
+    def test_punctuation_prefixed_key_impostor_fails(self):
+        # not.sponsor_equity_split= must not satisfy sponsor_equity_split --
+        # a key only counts when it follows whitespace or ';'.
+        marker = CONTRACT["spv_deal_marker"]
+        item = (
+            f"[{marker['component_id']}]{marker['tag']} SPV deal "
+            "not.sponsor_equity_split=60/40;not.residual_value_guarantee=undisclosed;"
+            "not.lease_term=15y;not.debt_tenor=7y;not.lead_lenders=Bank A;"
+        )
+        self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
+
+    def test_untagged_row_with_spv_keyword_fails(self):
+        self.assert_fails(report=spv_deal_marker_fixture(
+            event_item="[event_scan] SPV sale-leaseback financing disclosed"
+        ))
+
     def test_last_pair_missing_terminator_fails(self):
         item = spv_event_item()
         assert item.endswith(";")

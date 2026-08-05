@@ -394,7 +394,7 @@ def validate_contract(contract, failures):
 
         spv_marker = contract["spv_deal_marker"]
         if not isinstance(spv_marker, dict) or set(spv_marker) != {
-                "source_id", "component_id", "tag", "required_keys"}:
+                "source_id", "component_id", "tag", "required_keys", "keywords"}:
             failures.add("contract spv_deal_marker is invalid")
         else:
             marker_source = next(
@@ -428,6 +428,12 @@ def validate_contract(contract, failures):
                            for key in required_keys)
                     or len(required_keys) != len(set(required_keys))):
                 failures.add("contract spv_deal_marker required_keys is invalid")
+            keywords = spv_marker.get("keywords")
+            if (not isinstance(keywords, list) or not keywords
+                    or any(not isinstance(keyword, str) or not keyword.strip()
+                           for keyword in keywords)
+                    or len(keywords) != len(set(keywords))):
+                failures.add("contract spv_deal_marker keywords is invalid")
 
         score_keys = {dimension["key"] for dimension in dimensions}
         macro_roots = {"series", *macro_schema["required_blocks"]}
@@ -3210,18 +3216,41 @@ def validate_spv_deal_rows(rows, marker, where, failures):
     """Conditionally enforce required attributes on a tagged SPV deal row.
 
     A row is only inspected when its item cell contains the contract's
-    ``spv_deal_marker`` tag (matched case-insensitively); untagged rows are
-    never checked (same conditional-enforcement philosophy as trigger
-    ``evidence_tag``). A case-variant of the exact tag is rejected outright
-    -- it would otherwise read as tagged to a human but silently skip every
-    check below, since the case-sensitive gate would treat it as absent.
+    ``spv_deal_marker`` tag (matched case-insensitively), with one tripwire:
+    an untagged event-scan row of the marker's source whose item cell
+    mentions a contract-listed SPV keyword fails, so an obviously described
+    SPV deal cannot dodge the attribute requirements by omitting the tag.
+    Other untagged rows are never checked (same conditional-enforcement
+    philosophy as trigger ``evidence_tag``). A case-variant of the exact tag
+    is rejected outright -- it would otherwise read as tagged to a human but
+    silently skip every check below, since the case-sensitive gate would
+    treat it as absent.
     """
     tag = marker["tag"]
     prefix = f"[{marker['component_id']}]{tag}"
+
+    def keyword_hit(text):
+        for keyword in marker["keywords"]:
+            if keyword.isascii():
+                if re.search(rf"(?<![A-Za-z0-9]){re.escape(keyword)}", text,
+                             re.IGNORECASE):
+                    return keyword
+            elif keyword in text:
+                return keyword
+        return None
+
     for row in rows:
         item = row[1] if len(row) > 1 else ""
         tag_match = re.search(re.escape(tag), item, re.IGNORECASE)
         if not tag_match:
+            if (row[0] == marker["source_id"]
+                    and item.startswith(f"[{marker['component_id']}]")):
+                keyword = keyword_hit(item)
+                if keyword:
+                    failures.add(
+                        f"{where} spv_deal keyword '{keyword}' on an untagged "
+                        f"{marker['component_id']} row requires the {tag} tag: {row}"
+                    )
             continue
         if tag_match.group(0) != tag:
             failures.add(
@@ -3238,7 +3267,7 @@ def validate_spv_deal_rows(rows, marker, where, failures):
         all_present = True
         for key in marker["required_keys"]:
             matches = list(re.finditer(
-                rf"(?<![A-Za-z0-9_]){re.escape(key)}=([^;|]*)", item
+                rf"(?<=[\s;]){re.escape(key)}=([^;|]*)", item
             ))
             if len(matches) > 1:
                 failures.add(

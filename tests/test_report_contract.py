@@ -316,6 +316,22 @@ class ReportContractTests(unittest.TestCase):
             "30d" in message for message in failures.items
         ), failures.items)
 
+    def test_contract_rejects_spv_deal_marker_with_empty_keywords(self):
+        spec = importlib.util.spec_from_file_location(
+            "validate_report_spv_marker_keywords_test", VALIDATOR_PATH
+        )
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+        contract = copy.deepcopy(self.contract)
+        contract["spv_deal_marker"]["keywords"] = []
+        failures = validator.Failures()
+        self.assertFalse(
+            validator.validate_contract(contract, failures), failures.items
+        )
+        self.assertTrue(any(
+            "keywords" in message for message in failures.items
+        ), failures.items)
+
     def test_source_and_state_enums_are_unique(self):
         for key in (
             "anchors",
