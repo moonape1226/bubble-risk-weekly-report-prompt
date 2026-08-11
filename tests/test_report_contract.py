@@ -34,7 +34,7 @@ class ReportContractTests(unittest.TestCase):
         contract = self.contract
         self.assertEqual(contract["version"], 1)
         self.assertEqual(contract["macro_schema"]["version"], 1)
-        self.assertEqual(len(contract["macro_schema"]["required_series"]), 20)
+        self.assertEqual(len(contract["macro_schema"]["required_series"]), 21)
         self.assertEqual(contract["timezone"], "Asia/Taipei")
         self.assertEqual(len(contract["headings"]), 10)
         self.assertEqual(len(set(contract["headings"])), 10)

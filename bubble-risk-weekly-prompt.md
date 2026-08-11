@@ -225,7 +225,7 @@ All series below are fetched by `scripts/fetch_macro.py` (see "Macro-data fetch"
 - **Microcap thematic moonshots [primary: SEARCH]**: scan the week's biggest single-day stock movers for tickers under $1B market cap that gained ≥100% in one session (or sustained ≥50% over 2-3 sessions). Qualify the move as a moonshot signal only if the catalyst is a press release / 8-K / corporate announcement that stacks **two or more** hot themes (e.g. quantum computing, AI, lunar / space / NASA, fusion, robotics, defense, autonomous, nuclear, gene editing, weight-loss, crypto-treasury) **against weak fundamentals** (most recent quarterly revenue ≤ $5M, negative EBITDA, low cash). For each qualifying ticker record: ticker, single-day %, market cap, stacked themes, last-quarter revenue, cash position, and the source press release URL. Sources: Finviz biggest-gainers screener, Benzinga / MarketWatch movers, Yahoo Finance day's gainers, StockTwits trending. Example pattern (Astrotech ASTC, 2026-05-27, +516%): quantum + lunar + NASA stacked on quarterly revenue $343k. Required weekly screen — a week with zero qualifying tickers is `✓ SEARCH-VERIFIED（0 件）`, never ✗ NOT DISCLOSED.
 - Upcoming AI IPOs: OpenAI, Anthropic, xAI, SpaceX timing and valuation (cite concrete S-1 filing or named-source report within the past 30 days; if none, mark ✗ NOT DISCLOSED rather than reporting unsourced rumor)
 - Insider selling at AI / market-leadership companies: Form 4 clusters and sale-to-buy ratio [primary: SEC EDGAR]. Every named insider or dollar-amount claim must include Form 4 filing date, transaction date, issuer ticker, SEC EDGAR filing URL, and sale/buy amount within the past 14 days. If no qualifying filing-level details are found within the past 14 days, mark `✓ SEARCH-VERIFIED（0 件）` (the screen ran; nothing qualified — this is a required item, so ✗ NOT DISCLOSED is forbidden) and do not report stale names or dollar amounts from older news.
-- Cboe equity-only put/call ratio [primary: SEARCH] (best-effort): from Cboe daily market statistics / YCharts / MacroMicro. Sustained low readings（如 < 0.50）= call-heavy directional speculation. Confirmation cross-check inside 投機行為 scoring, not a primary input; if no current value is found, mark ✗ NOT DISCLOSED — its absence must not lower the D3 primary score.
+- Cboe equity-only put/call ratio [primary: SEARCH] (best-effort): from Cboe daily market statistics / YCharts / MacroMicro. Sustained low readings（如 < 0.50）= call-heavy directional speculation. Scored input inside 投機行為——方向失衡比選擇權絕對成交量更能分辨「投資人是否真的在追買 call」，rubric 門檻見 D3。Record the ratio, its observation date, and whether it is the daily or the 5-day average reading. If no current value is found, mark ✗ NOT DISCLOSED; the input then drops out of D3 scoring and its absence must not lower the D3 score.
 
 ## Structural Leverage
 
@@ -236,6 +236,7 @@ All series below are fetched by `scripts/fetch_macro.py` (see "Macro-data fetch"
 - 0DTE option volume: CBOE daily market statistics; SpotGamma / Goldman Derivatives Insights summaries if public
 - Options total volume: OCC monthly volume report
 - Cross-asset derivatives / correlation checks: VIX term structure, Cboe SKEW, and rolling stock-bond correlation
+- **VIX / S&P 500 co-movement**: FRED series `VIXCLS` paired with the `sp500_trend` block by `scripts/fetch_macro.py`, emitted as the derived `vix_spx_comove` block. Equity and volatility normally move against each other; both rising over the same window（S&P 500 ≥ `calibration.vix_comove_sp500_chg_pct`、VIX ≥ `calibration.vix_comove_chg_pct`，兩者皆為 %；此處刻意不共用 `direction_thresholds.sp500_chg_pct`——那個是為 §3 的前次執行日增量校準的，窗口長度不同）＝ crowded-optionality 警戒讀數：指數還在推進，但避險／上檔選擇權需求同時被搶高，代表漲勢不再被視為安全。FRED publishes `SP500` a business day ahead of `VIXCLS`, so the window is **not** the prior-run delta: it is a trailing ~`calibration.vix_comove_trailing_days` day pair taken from the dates the two series actually share, read from the bounded `alignment_observations` proofs that both carry, and rejected when the shared base is older than twice that window. `as_of` / `base_date` / `window_days` disclose the window actually used; report them with the reading. A verdict is never assembled from two different windows — no reproducible shared pair emits `status: unavailable` and `comove: false`. Required (script; VIXCLS 為 FRED 一般序列，`fetch_failed` 即 ⛔ FETCH FAILED，never ✗ NOT DISCLOSED)
 - Cross-reference only: FINRA margin debt or FRED series BOGZ1FL073164003.Q, including the margin debt / equity market cap ratio from Retail Sentiment as a confirmation check only (primary margin debt scoring remains under retail sentiment; do not double-count it here)
 - **AI infrastructure debt financing / vendor-financing loops [primary: SEARCH]** (best-effort): scan the past 30 days for disclosed debt financing, private credit facilities, ABS / asset-backed facilities, delayed-draw term loans, convertible debt, or sale-leaseback financing tied to AI GPU clusters, neoclouds, or data centers (CoreWeave, Crusoe, Lambda, Nebius, Applied Digital, xAI / OpenAI infrastructure vehicles, Stargate-related entities). Record borrower, amount, date, financing type, collateral / customer-contract backing if disclosed, pricing / rating if disclosed, use of proceeds, and source URL. Hyperscaler-sponsored SPV / sale-leaseback vehicles（hyperscaler 為 tenant 或少數股權持有者）belong under the hyperscaler 融資結構 bullet with `[event_scan][spv_deal]`, never here; a neocloud deal that merely names a hyperscaler as customer or capacity backstop stays here. Separately track Nvidia / hyperscaler circular-financing exposure: disclosed equity investments, customer purchase commitments, capacity backstops, vendor-financing-like arrangements, or guarantees where the recipient is also a buyer of GPUs / compute. Quantify only named disclosed deal amounts; do not invent a circular-financing ratio. If no new disclosure is found in the past 30 days, mark ✗ NOT DISCLOSED for the weekly event signal and optionally cite the latest outstanding disclosed facilities as background, not as 本次新增訊號.
 - Bank loans to nondepository financial institutions: FRED series LNFACBW027SBOG (weekly, H.8; fetched by `scripts/fetch_macro.py`) — 銀行對 NBFI 的信用曝險水位與週趨勢，BIS AER 2026 Ch II「銀行–主權 nexus 經 NBFI 擴寬」通道的量化 read。Confirmation input only（不主計分，見 D6 評分說明）。Required (script; WebSearch spot if the script reports `fetch_failed`, else ⛔ FETCH FAILED; never ✗ NOT DISCLOSED)
@@ -364,7 +365,7 @@ For each dimension, give a score 0-100 with a rationale citing specific data poi
 
 - 子標題：`### <N>. <維度名> — <本次分數>（weight <X>%，Δ <±N｜0｜—>）`
 - 每個計分輸入一條 bullet：`**<指標名>** <數值>（<資料日期>，<來源連結 / FRED series ID>）——<一句判讀>`。一條 bullet 只講一個訊號，關鍵數值加粗。
-- Confirmation-only 輸入（如 ECY、NAAIM、Cboe put/call、VIX / SKEW、margin-debt cross-ref）在判讀句尾標「（confirmation，不主計分）」。
+- Confirmation-only 輸入（如 ECY、NAAIM、VIX term structure / SKEW、margin-debt cross-ref）在判讀句尾標「（confirmation，不主計分）」。
 - 缺值輸入（`✗ NOT DISCLOSED` / `⛔ FETCH FAILED`）也各佔一條 bullet，寫明狀態與「不納入計分」。
 - 末行固定：`**結論**：<≤2 句——本次分數落在 rubric 哪個區間、相對前次升／降／持平的原因>`。D5 必須以 exact form `**結論**：<自滿側|扳機側|中性>；<判讀>` 開頭，且側別等於 `score.json.monetary_side`。
 
@@ -415,15 +416,17 @@ Score based on:
 - Insider selling clusters among AI / market leaders
 - OpenAI / Anthropic revenue trajectory (concentration risk indicator)
 - Upcoming mega-IPO pipeline (liquidity drain risk)
-- Cboe equity put/call ratio（confirmation only，持續低檔＝call 方向性投機擁擠；best-effort，缺值不調分）
+- Cboe equity put/call ratio（計分輸入；持續低檔＝call 方向性投機擁擠。best-effort 抓取，缺值時該輸入退出計分、不因缺值調降分數）
 
 **Rubric anchor points**（分數愈高＝投機愈狂；moonshot 計數見 Data sources 篩選準則）：
 
-- 0-20：無 +AI 改名 / SPAC、IPO 稀少且具營收、無 microcap moonshot、insider 買賣平衡
-- 21-40：零星投機——偶見改名 / SPAC、IPO 溫和、moonshot 0–1 檔/週
-- 41-60：投機升溫——多起改名 / SPAC、IPO first-day pop 明顯、moonshot 1–2 檔/週、insider 賣壓上升
-- 61-80：投機熱——無營收 IPO 佔比高、moonshot 多檔/週、insider 集中賣出
-- 81-100：狂熱——大量 +AI 改名、無營收 IPO 暴衝、moonshot 每週多檔（比擬 1999 / 2021-12）、insider 大規模出脫
+- 0-20：無 +AI 改名 / SPAC、IPO 稀少且具營收、無 microcap moonshot、insider 買賣平衡、equity put/call ≥ 0.70
+- 21-40：零星投機——偶見改名 / SPAC、IPO 溫和、moonshot 0–1 檔/週、equity put/call ≥ 0.60 且 < 0.70
+- 41-60：投機升溫——多起改名 / SPAC、IPO first-day pop 明顯、moonshot 1–2 檔/週、insider 賣壓上升、equity put/call ≥ 0.55 且 < 0.60
+- 61-80：投機熱——無營收 IPO 佔比高、moonshot 多檔/週、insider 集中賣出、equity put/call ≥ 0.50 且 < 0.55
+- 81-100：狂熱——大量 +AI 改名、無營收 IPO 暴衝、moonshot 每週多檔（比擬 1999 / 2021-12）、insider 大規模出脫、equity put/call 持續 < 0.50
+
+put/call 門檻是本維度的其中一項計分輸入，不是單獨的分數決定器：與改名 / IPO / moonshot / insider 各項並列權衡。該值 `✗ NOT DISCLOSED` 時，僅以其餘輸入定分，並在該維度保留一條缺值 bullet。
 
 ### 4. 散戶情緒 (weight 12%)
 
@@ -486,6 +489,7 @@ Score based on:
 - 0DTE option share of SPX option volume (rolling 5-day = simple mean of the last 5 trading sessions' daily 0DTE-share-of-SPX-volume; if fewer than 5 sessions are available, use what is available and note the session count)
 - Options total volume / cash equity volume ratio
 - VIX term structure, SKEW, and stock-bond correlation as confirmation signals for crowded optionality / cross-asset complacency
+- VIX 與 S&P 500 同向上行（`vix_spx_comove.comove == true`）：計分判讀輸入，不是 confirmation。同漲＝上漲本身正在被付費對沖／追價，是 crowded-optionality 的直接證據，較「選擇權總成交量」更能分辨方向失衡；命中時本維度上調一個判讀級距。`status` 為 `unavailable` 時視為未命中、不調分（不得反向解讀為安全）。判讀句須帶 `as_of`、`base_date` 與 `window_days`，因為此窗口是共同時間軸上的 trailing 窗、不等於前次執行日。單次同漲屬警戒而非確認：只有在同漲與 0DTE share、槓桿 ETF AUM 其中之一同時偏高時，才可作為 61-80 以上級距的支撐證據
 - Cross-reference margin debt / equity market cap ratio from 散戶情緒 as confirmation only; do not double-count it in 結構性槓桿 scoring
 - AI infrastructure debt financing / vendor-financing loops: disclosed AI data-center / GPU-backed debt facilities, private credit / ABS issuance, and Nvidia / hyperscaler customer-financing ties. Treat this as structural leverage inside the AI capex trade, not as general macro credit conditions; do not create a seventh dimension or change the 15% weight. Reuse the 10Y real-vs-breakeven decomposition from 貨幣與信貸 and already-disclosed facilities only as a refinancing-sensitivity cross-reference; do not add a new weekly fetch requirement here. Add structural-leverage risk only when sources show debt-term deterioration, refinancing stress, collateral impairment, or customer-contract weakness; otherwise keep it as background and do not double-count. Cross-reference backlog 重複計算風險（D1 的 customer concentration / RPO double-counting bullet）as confirmation only：同一終端客戶的承諾同時支撐多家供應商的 backlog 及其上的債務融資時，circular 網對單點失望的傳導面更大；營收品質的 primary 判讀留在 D1，不在此重複計分。Broad private-credit / non-bank fund redemption-gate liquidity stress is scored under 貨幣與信貸 (dimension 5), not here; this item is limited to AI-infrastructure / data-center financing leverage.
 - Cross-reference AI compute overcapacity signals from 估值溢價 as confirmation only（含資本週期階段 bullet 的租約取消／專案延後、進入者退出事件）: capacity glut / utilization weakness is the trigger mechanism that can impair GPU collateral values, customer-contract backing, and circular vendor-financing loops. Primary scoring for the supply/demand gap remains under AI fundamentals / valuation; do not double-count it here.

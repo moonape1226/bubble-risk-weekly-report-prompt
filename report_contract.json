@@ -8,7 +8,7 @@
       "DFEDTARU", "DFEDTARL", "WALCL", "DCOILWTICO", "ECBASSETSW",
       "JPNASSETS", "BOGZ1FL153064486Q", "T5YIFR", "CPIAUCSL",
       "THREEFYTP10", "SOFR", "SOFR99", "IORB", "RPONTTLD",
-      "LNFACBW027SBOG"
+      "LNFACBW027SBOG", "VIXCLS"
     ],
     "series_units": {
       "DGS10": "pct", "DFII10": "pct", "T10YIE": "pct",
@@ -18,11 +18,12 @@
       "JPNASSETS": "jpy_100mn", "BOGZ1FL153064486Q": "level",
       "T5YIFR": "pct", "CPIAUCSL": "level", "THREEFYTP10": "pct",
       "SOFR": "pct", "SOFR99": "pct", "IORB": "pct",
-      "RPONTTLD": "usd_bn", "LNFACBW027SBOG": "usd_bn"
+      "RPONTTLD": "usd_bn", "LNFACBW027SBOG": "usd_bn",
+      "VIXCLS": "level"
     },
     "trailing_delta_days": {"THREEFYTP10": 7},
     "yoy_base_age_days": {"CPIAUCSL": {"min": 350, "max": 380, "same_month_previous_year": true}},
-    "alignment_proof_series": ["DGS10", "DFII10", "IORB", "SOFR99"],
+    "alignment_proof_series": ["DGS10", "DFII10", "IORB", "SOFR99", "VIXCLS"],
     "derived_series": {
       "T10YIE": {
         "source": "DGS10 - DFII10",
@@ -32,7 +33,7 @@
     },
     "required_blocks": [
       "sp500_trend", "cftc_lev_funds", "move_index", "ofr_repo",
-      "repo_stress", "decomposition"
+      "repo_stress", "decomposition", "vix_spx_comove"
     ]
   },
   "disclaimer": "本報告為相對風險溫度計，非擇時訊號。",
@@ -121,8 +122,14 @@
     "hy_oas_fired_delta_bps": 50,
     "hy_oas_initial_widening_streak": 2,
     "term_premium_initial_delta_bps": 15,
-    "decomposition_identity_tolerance_bps": 0.3
+    "decomposition_identity_tolerance_bps": 0.3,
+    "vix_comove_chg_pct": 5,
+    "vix_comove_sp500_chg_pct": 0.5,
+    "vix_comove_trailing_days": 7
   },
+  "macro_window_disclosures": [
+    {"source_id": "structural.vix_spx_comove", "dimension_key": "structural", "block": "vix_spx_comove", "fields": ["as_of", "base_date", "window_days"]}
+  ],
   "trigger_reason_codes": {
     "hy_oas_fired": {"state": "已擊發", "kind": "machine"},
     "private_credit_gate": {"state": "已擊發", "kind": "evidence", "source_ids": ["monetary.private_credit_liquidity"], "evidence_tag": "[private_credit_gate]", "window": "30d"},
@@ -334,6 +341,7 @@
     {"id": "structural.zero_dte", "required": true, "window": "snapshot", "prompt_match": "0DTE option volume"},
     {"id": "structural.options_volume", "required": true, "window": "stock_of_state", "prompt_match": "Options total volume"},
     {"id": "structural.cross_asset_derivatives", "required": true, "window": "snapshot", "prompt_match": "Cross-asset derivatives / correlation checks"},
+    {"id": "structural.vix_spx_comove", "required": true, "window": "snapshot", "prompt_match": "VIX / S&P 500 co-movement", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "VIXCLS"}, {"kind": "block", "key": "vix_spx_comove"}]}},
     {"id": "structural.margin_debt_crosscheck", "required": true, "window": "stock_of_state", "prompt_match": "Cross-reference only: FINRA margin debt"},
     {"id": "structural.ai_infrastructure_debt", "required": false, "window": "30d", "prompt_match": "AI infrastructure debt financing / vendor-financing loops"},
     {"id": "structural.nbfi_bank_loans", "required": true, "window": "snapshot", "prompt_match": "Bank loans to nondepository financial institutions", "macro": {"aggregation": "all", "components": [{"kind": "series", "key": "LNFACBW027SBOG"}]}},
