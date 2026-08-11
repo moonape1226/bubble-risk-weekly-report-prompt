@@ -196,9 +196,9 @@ def validate_contract(contract, failures):
         macro_schema = contract["macro_schema"]
         if macro_schema.get("version") != 1:
             failures.add("unsupported macro schema version in contract")
-        if len(macro_schema["required_series"]) != 20 or len(
-                set(macro_schema["required_series"])) != 20:
-            failures.add("contract macro schema must define 20 unique series")
+        if len(macro_schema["required_series"]) != 21 or len(
+                set(macro_schema["required_series"])) != 21:
+            failures.add("contract macro schema must define 21 unique series")
         if set(macro_schema.get("series_units", {})) != set(
                 macro_schema["required_series"]):
             failures.add("contract series_units must cover the exact series schema")
@@ -219,7 +219,7 @@ def validate_contract(contract, failures):
                 or yoy_ages["CPIAUCSL"]["same_month_previous_year"] is not True):
             failures.add("contract yoy_base_age_days is invalid")
         if macro_schema.get("alignment_proof_series") != [
-                "DGS10", "DFII10", "IORB", "SOFR99"]:
+                "DGS10", "DFII10", "IORB", "SOFR99", "VIXCLS"]:
             failures.add("contract alignment_proof_series is invalid")
         derived = macro_schema.get("derived_series")
         if not isinstance(derived, dict) or set(derived) != {"T10YIE"}:
@@ -794,6 +794,92 @@ def validate_prior(prior, contract, failures):
     return None if len(failures.items) != failure_count else merged
 
 
+def bounded_proof_pairs(proof, label, failures, latest_day=None, latest_value=None):
+    """Validate a bounded alignment proof; return [(date, value)] newest first."""
+    if not isinstance(proof, list) or not 1 <= len(proof) <= 32:
+        failures.add(f"{label} lacks bounded alignment observations")
+        return None
+    pairs = []
+    for index, observation in enumerate(proof):
+        if (not isinstance(observation, dict)
+                or set(observation) != {"date", "value"}
+                or not finite_number(observation.get("value"))):
+            failures.add(f"{label} alignment observation {index} is malformed")
+            return None
+        day = strict_date(
+            observation["date"], f"{label} alignment date {index}", failures
+        )
+        if day is None:
+            return None
+        pairs.append((day, observation["value"]))
+    days = [day for day, _value in pairs]
+    if days != sorted(days, reverse=True) or len(days) != len(set(days)):
+        failures.add(f"{label} alignment dates are not unique descending")
+        return None
+    if latest_day is not None and pairs[0] != (latest_day, latest_value):
+        failures.add(f"{label} alignment proof does not start at the latest observation")
+        return None
+    return pairs
+
+
+def proof_levels(block):
+    """Date-keyed levels from an already-validated alignment proof."""
+    levels = {}
+    proof = block.get("alignment_observations") if isinstance(block, dict) else None
+    for observation in proof if isinstance(proof, list) else []:
+        if (isinstance(observation, dict)
+                and isinstance(observation.get("date"), str)
+                and finite_number(observation.get("value"))):
+            try:
+                levels[date.fromisoformat(observation["date"])] = observation["value"]
+            except ValueError:
+                continue
+    return levels
+
+
+def expected_comove_legs(macro, contract):
+    """Recompute the trailing-window co-movement legs, or None when unavailable.
+
+    Mirrors ``fetch_macro.vix_spx_comove_block``: the window is the newest
+    date the two series share plus the newest shared date at or before the
+    trailing target, read only from the bounded proofs in the artifact.
+    """
+    series = macro.get("series") if isinstance(macro.get("series"), dict) else {}
+    vix = series.get("VIXCLS") if isinstance(series.get("VIXCLS"), dict) else {}
+    sp500 = macro.get("sp500_trend") if isinstance(macro.get("sp500_trend"), dict) else {}
+    if vix.get("status") != "ok" or sp500.get("status") != "ok":
+        return None
+    vix_levels, sp500_levels = proof_levels(vix), proof_levels(sp500)
+    shared = sorted(set(vix_levels) & set(sp500_levels), reverse=True)
+    if not shared:
+        return None
+    trailing_days = contract["calibration"]["vix_comove_trailing_days"]
+    latest = shared[0]
+    target = latest - timedelta(days=trailing_days)
+    base = next((day for day in shared if day <= target), None)
+    if base is None:
+        return None
+    window_days = (latest - base).days
+    if window_days > trailing_days * 2:
+        return None
+    if vix_levels[base] <= 0 or sp500_levels[base] <= 0:
+        return None
+    vix_chg_pct = round(
+        (vix_levels[latest] - vix_levels[base]) / vix_levels[base] * 100, 2)
+    sp500_chg_pct = round(
+        (sp500_levels[latest] - sp500_levels[base]) / sp500_levels[base] * 100, 2)
+    return {
+        "as_of": latest.isoformat(), "base_date": base.isoformat(),
+        "window_days": window_days,
+        "vix": vix_levels[latest], "vix_base": vix_levels[base],
+        "vix_chg_pct": vix_chg_pct,
+        "sp500": sp500_levels[latest], "sp500_base": sp500_levels[base],
+        "sp500_chg_pct": sp500_chg_pct,
+        "comove": (sp500_chg_pct >= contract["direction_thresholds"]["sp500_chg_pct"]
+                   and vix_chg_pct >= contract["calibration"]["vix_comove_chg_pct"]),
+    }
+
+
 def validate_macro_shape(macro, contract, failures):
     """Reject malformed nested macro data before any semantic traversal."""
     failure_count = len(failures.items)
@@ -1196,6 +1282,7 @@ def validate_macro_shape(macro, contract, failures):
                 "prior_date", "prior", "delta_abs",
                 "transaction_volume_usd_bn",
                 "prior_transaction_volume_usd_bn",
+                "alignment_observations",
             }
             stale = sorted(success_fields & set(block))
             if stale:
@@ -1238,6 +1325,10 @@ def validate_macro_shape(macro, contract, failures):
                         (block["latest"] - block["ma200"]) / block["ma200"] * 100, 2
                     )):
                 failures.add("macro sp500_trend.dev200_pct arithmetic is invalid")
+            bounded_proof_pairs(
+                block.get("alignment_observations"), "macro sp500_trend",
+                failures, latest_day=latest_day, latest_value=block.get("latest"),
+            )
             ma52_fields = {"ma52w", "dev52w_pct"} & set(block)
             if ma52_fields and ma52_fields != {"ma52w", "dev52w_pct"}:
                 failures.add("macro sp500_trend 52-week fields are incomplete")
@@ -1480,6 +1571,56 @@ def validate_macro_shape(macro, contract, failures):
                 failures.add("macro repo_stress SRF value != RPONTTLD latest")
             if repo.get("srf_date") != srf_series.get("latest_date"):
                 failures.add("macro repo_stress SRF date != RPONTTLD latest_date")
+    comove_block = macro.get("vix_spx_comove", {})
+    if isinstance(comove_block, dict):
+        comove_leg_fields = {
+            "as_of", "base_date", "window_days", "vix", "vix_base",
+            "vix_chg_pct", "sp500", "sp500_base", "sp500_chg_pct",
+        }
+        status = comove_block.get("status")
+        if status not in ("ok", "unavailable"):
+            failures.add("macro vix_spx_comove has invalid status")
+        if type(comove_block.get("comove")) is not bool:
+            failures.add("macro vix_spx_comove.comove must be boolean")
+        extra = sorted(
+            set(comove_block) - comove_leg_fields - {"status", "comove", "note"}
+        )
+        if extra:
+            failures.add(f"macro vix_spx_comove has unexpected fields: {extra}")
+        expected_legs = expected_comove_legs(macro, contract)
+        if expected_legs is None:
+            if status == "ok":
+                failures.add(
+                    "macro vix_spx_comove claims a verdict without a "
+                    "reproducible shared trailing window"
+                )
+            if comove_block.get("comove") is not False:
+                failures.add(
+                    "macro vix_spx_comove without a verdict must report comove false"
+                )
+            retained = sorted(comove_leg_fields & set(comove_block))
+            if retained:
+                failures.add(
+                    f"macro vix_spx_comove unavailable retains leg fields: {retained}"
+                )
+        elif status == "unavailable":
+            failures.add(
+                "macro vix_spx_comove is unavailable although its window is "
+                "reproducible from the emitted proofs"
+            )
+        else:
+            for field, expected_value in expected_legs.items():
+                if comove_block.get(field) != expected_value:
+                    failures.add(
+                        f"macro vix_spx_comove.{field} "
+                        f"{comove_block.get(field)!r} != recomputed "
+                        f"{expected_value!r}"
+                    )
+            as_of_day = strict_date(
+                comove_block.get("as_of"), "macro vix_spx_comove.as_of", failures
+            )
+            if generated and as_of_day and as_of_day > generated.date():
+                failures.add("macro vix_spx_comove.as_of is after generated_at")
     decomposition = macro.get("decomposition", {})
     if isinstance(decomposition, dict):
         driver = decomposition.get("driver")
@@ -3143,18 +3284,6 @@ def macro_component(macro, component):
     return macro.get(component["key"], {})
 
 
-def macro_component_value(component, block):
-    if component["kind"] == "series":
-        return block.get(component.get("value_field", "latest"))
-    if component["key"] in ("sp500_trend", "move_index"):
-        return block.get("latest")
-    if component["key"] == "cftc_lev_funds":
-        return block.get("net_contracts")
-    if component["key"] == "ofr_repo":
-        return block.get("transaction_volume_usd_bn")
-    return None
-
-
 def mentions_identifier(text, identifier):
     """Match a machine identifier without accepting a longer identifier."""
     if not isinstance(text, str) or not isinstance(identifier, str):
@@ -3201,6 +3330,13 @@ def macro_component_evidence_fields(component, block):
             "transaction_volume_usd_bn": "latest_date",
             "prior_transaction_volume_usd_bn": "prior_date",
             "chg_pct": "latest_date",
+        }
+    elif component["key"] == "vix_spx_comove":
+        primary = "vix"
+        date_fields = {
+            "vix": "as_of", "vix_base": "base_date", "vix_chg_pct": "as_of",
+            "sp500": "as_of", "sp500_base": "base_date",
+            "sp500_chg_pct": "as_of", "window_days": "as_of",
         }
     else:
         return None, {}
@@ -3545,8 +3681,12 @@ def validate_appendix(doc, report_day, macro, contract, failures):
             if not matching:
                 failures.add(f"raw evidence for {source_id} does not identify macro component {key}")
                 continue
-            latest_date = block.get("latest_date")
-            expected_value = macro_component_value(component, block)
+            primary_field, evidence_fields = macro_component_evidence_fields(
+                component, block
+            )
+            expected_value, latest_date = evidence_fields.get(
+                primary_field, (None, None)
+            )
             if (latest_date and finite_number(expected_value)
                     and not any(
                         row[4] == latest_date
@@ -3557,9 +3697,6 @@ def validate_appendix(doc, report_day, macro, contract, failures):
                     f"raw evidence value/date for {source_id}/{key} != macro value/date"
                 )
 
-            primary_field, evidence_fields = macro_component_evidence_fields(
-                component, block
-            )
             for row in matching:
                 row_hits = [
                     candidate for candidate in component_keys

@@ -26,6 +26,8 @@ CONTRACT = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
 DATE = "2026-07-13"
 PRIOR_DATE = "2026-07-09"
+# 8 days before the 07-10 macro observation date: inside the trailing window
+COMOVE_BASE_DATE = "2026-07-02"
 TIMESTAMP = "2026-07-13T08:00:00+08:00"
 SEARCH_ID = "speculation.ai_rename_spac"
 
@@ -81,7 +83,7 @@ def macro_payload(baseline=False):
         "JPNASSETS": 7500000.0, "BOGZ1FL153064486Q": 43.0,
         "T5YIFR": 2.20, "CPIAUCSL": 320.0, "THREEFYTP10": 0.65,
         "SOFR": 4.30, "SOFR99": 4.35, "IORB": 4.31,
-        "RPONTTLD": 0.1, "LNFACBW027SBOG": 1200.0,
+        "RPONTTLD": 0.1, "LNFACBW027SBOG": 1200.0, "VIXCLS": 15.2,
     }
     common_series = {
         sid: {
@@ -95,6 +97,10 @@ def macro_payload(baseline=False):
             "date": common_series[sid]["latest_date"],
             "value": common_series[sid]["latest"],
         }]
+    # VIXCLS needs a trailing base so vix_spx_comove has a shared window
+    common_series["VIXCLS"]["alignment_observations"].append(
+        {"date": COMOVE_BASE_DATE, "value": 15.2}
+    )
     common_series["CPIAUCSL"].update({
         "yoy_base_date": "2025-07-10",
         "yoy_base": 310.6796116504854,
@@ -114,6 +120,24 @@ def macro_payload(baseline=False):
             "latest_date": "2026-07-10",
             "ma200": 6763.74,
             "dev200_pct": 12.0,
+            "alignment_observations": [
+                {"date": "2026-07-10", "value": 7575.39},
+                {"date": COMOVE_BASE_DATE, "value": 7543.64},
+            ],
+        },
+        "vix_spx_comove": {
+            "status": "ok",
+            "as_of": "2026-07-10",
+            "base_date": COMOVE_BASE_DATE,
+            "window_days": 8,
+            "vix": 15.2,
+            "vix_base": 15.2,
+            "vix_chg_pct": 0.0,
+            "sp500": 7575.39,
+            "sp500_base": 7543.64,
+            "sp500_chg_pct": 0.42,
+            "comove": False,
+            "note": "trailing window; thresholds not met",
         },
         "cftc_lev_funds": {
             "status": "ok", "source": "CFTC", "latest_date": "2026-07-10",
@@ -167,7 +191,7 @@ def macro_payload(baseline=False):
             if sid not in ("CPIAUCSL", "BOGZ1FL153064486Q"):
                 if sid in ("DCOILWTICO", "RPONTTLD", "LNFACBW027SBOG"):
                     common_series[sid]["chg_pct"] = 0.0
-                elif sid not in ("WALCL", "ECBASSETSW", "JPNASSETS"):
+                elif sid not in ("WALCL", "ECBASSETSW", "JPNASSETS", "VIXCLS"):
                     common_series[sid]["delta_bps"] = 0.0
         payload["move_index"].update({
             "prior": 95.0, "prior_date": PRIOR_DATE, "delta_abs": 0.0,
@@ -245,6 +269,10 @@ def raw_block():
                          else macro[key])
                 if component["kind"] == "series":
                     value = block.get(component.get("value_field", "latest"))
+                    data_date = block["latest_date"]
+                elif key == "vix_spx_comove":
+                    value = block["vix"]
+                    data_date = block["as_of"]
                 else:
                     value = block.get(
                         "latest",
@@ -253,9 +281,10 @@ def raw_block():
                             block.get("transaction_volume_usd_bn", 1),
                         ),
                     )
+                    data_date = block["latest_date"]
                 rows.append(
                     f"| {source_id} | {key} | {value} | API {key} | "
-                    f"{block['latest_date']} | {TIMESTAMP} |"
+                    f"{data_date} | {TIMESTAMP} |"
                 )
         else:
             event_window = source["window"] in ("7d", "14d", "30d", "90d")
@@ -564,6 +593,17 @@ def raw_row(source_id, component=None):
     if len(rows) != 1:
         raise AssertionError(f"expected one raw row for {source_id}/{component}: {rows}")
     return rows[0]
+
+
+def comove_unavailable_report(report=None):
+    """Degrade the co-movement Coverage row and drop its derived Raw row."""
+    source_id = "structural.vix_spx_comove"
+    coverage = coverage_row(source_id)
+    report = replace_once(
+        report if report is not None else make_report(),
+        coverage, coverage.replace("✓ API", "⛔ FETCH FAILED"),
+    )
+    return replace_once(report, raw_row(source_id, "| vix_spx_comove |") + "\n", "")
 
 
 def wti_search_fallback_fixture(marker=None):
@@ -1736,6 +1776,170 @@ class RequiredStructure(ValidatorCase):
         ))
 
 
+class VixSpxComoveArtifact(ValidatorCase):
+    """The co-movement verdict must be reproducible from the emitted proofs."""
+
+    def comove_true_macro(self):
+        """Lower both trailing bases so the recomputed verdict is genuinely true.
+
+        Only the proof bases move, so every reported level, §3 direction and
+        appendix row in the golden report stays valid.
+        """
+        macro = macro_payload()
+        macro["series"]["VIXCLS"]["alignment_observations"][1]["value"] = 14.0
+        macro["sp500_trend"]["alignment_observations"][1]["value"] = 7500.0
+        macro["vix_spx_comove"].update({
+            "vix_base": 14.0, "vix_chg_pct": 8.57,
+            "sp500_base": 7500.0, "sp500_chg_pct": 1.01,
+            "comove": True,
+        })
+        return macro
+
+    def test_golden_verdict_is_recomputed(self):
+        self.assert_passes()
+
+    def test_flipped_verdict_fails(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"]["comove"] = True
+        self.assert_fails(macro=macro)
+
+    def test_vix_chg_pct_arithmetic_is_recomputed(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"]["vix_chg_pct"] = 8.0
+        self.assert_fails(macro=macro)
+
+    def test_sp500_chg_pct_arithmetic_is_recomputed(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"]["sp500_chg_pct"] = 0.9
+        self.assert_fails(macro=macro)
+
+    def test_legs_must_match_the_vix_proof(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"]["vix_base"] = 14.0
+        self.assert_fails(macro=macro)
+
+    def test_legs_must_match_the_sp500_proof(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"]["sp500"] = 7600.0
+        self.assert_fails(macro=macro)
+
+    def test_window_dates_must_match_the_shared_timeline(self):
+        for field, value in (
+            ("as_of", "2026-07-09"),
+            ("base_date", "2026-07-01"),
+            ("window_days", 7),
+        ):
+            with self.subTest(field=field):
+                macro = macro_payload()
+                macro["vix_spx_comove"][field] = value
+                self.assert_fails(macro=macro)
+
+    def test_unavailable_while_window_is_reproducible_fails(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"] = {
+            "status": "unavailable", "comove": False, "note": "x",
+        }
+        self.assert_fails(macro=macro)
+
+    def test_verdict_without_a_shared_base_fails(self):
+        macro = macro_payload()
+        del macro["series"]["VIXCLS"]["alignment_observations"][1]
+        self.assert_fails(macro=macro)
+
+    def test_missing_shared_base_degrades_to_unavailable(self):
+        macro = macro_payload()
+        del macro["series"]["VIXCLS"]["alignment_observations"][1]
+        macro["vix_spx_comove"] = {
+            "status": "unavailable", "comove": False,
+            "note": "no shared base observation",
+        }
+        self.assert_passes(report=comove_unavailable_report(), macro=macro)
+
+    def test_unavailable_block_cannot_be_certified_as_api_coverage(self):
+        # the VIX level still fetched, but with no verdict the Coverage row
+        # must not claim script success on the strength of that leg alone
+        macro = macro_payload()
+        del macro["series"]["VIXCLS"]["alignment_observations"][1]
+        macro["vix_spx_comove"] = {
+            "status": "unavailable", "comove": False,
+            "note": "no shared base observation",
+        }
+        self.assert_fails(macro=macro)
+
+    def test_derived_raw_row_must_reproduce_from_the_block(self):
+        source_id = "structural.vix_spx_comove"
+        row = raw_row(source_id, "| vix_spx_comove |")
+        report = replace_once(
+            make_report(), row, row.replace("| 15.2 |", "| 19.9 |")
+        )
+        self.assert_fails(report=report)
+
+    def test_base_older_than_twice_the_window_is_unavailable(self):
+        macro = macro_payload()
+        stale = "2026-06-20"
+        macro["series"]["VIXCLS"]["alignment_observations"][1]["date"] = stale
+        macro["sp500_trend"]["alignment_observations"][1]["date"] = stale
+        self.assert_fails(macro=macro)
+        macro["vix_spx_comove"] = {
+            "status": "unavailable", "comove": False,
+            "note": "shared trailing base is too old",
+        }
+        self.assert_passes(report=comove_unavailable_report(), macro=macro)
+
+    def test_unavailable_must_not_retain_legs(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"]["status"] = "unavailable"
+        self.assert_fails(macro=macro)
+
+    def test_failed_vix_series_requires_unavailable(self):
+        macro = macro_payload()
+        macro["series"]["VIXCLS"] = {"status": "fetch_failed", "source": None}
+        self.assert_fails(macro=macro)
+
+    def test_invalid_status_fails(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"]["status"] = "partial"
+        self.assert_fails(macro=macro)
+
+    def test_nonboolean_comove_fails(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"]["comove"] = "false"
+        self.assert_fails(macro=macro)
+
+    def test_unexpected_field_fails(self):
+        macro = macro_payload()
+        macro["vix_spx_comove"]["prior_date"] = PRIOR_DATE
+        self.assert_fails(macro=macro)
+
+    def test_missing_block_fails(self):
+        macro = macro_payload()
+        del macro["vix_spx_comove"]
+        self.assert_fails(macro=macro)
+
+    def test_sp500_proof_head_must_be_the_latest_observation(self):
+        macro = macro_payload()
+        macro["sp500_trend"]["alignment_observations"][0]["value"] = 7000.0
+        self.assert_fails(macro=macro)
+
+    def test_sp500_proof_dates_must_be_unique_descending(self):
+        macro = macro_payload()
+        macro["sp500_trend"]["alignment_observations"].reverse()
+        self.assert_fails(macro=macro)
+
+    def test_genuine_comove_passes(self):
+        self.assert_passes(macro=self.comove_true_macro())
+
+    def test_genuine_comove_denied_fails(self):
+        macro = self.comove_true_macro()
+        macro["vix_spx_comove"]["comove"] = False
+        self.assert_fails(macro=macro)
+
+    def test_baseline_run_still_produces_a_verdict(self):
+        # the trailing window lives on the series timeline, so a baseline run
+        # is not a reason to drop the signal
+        self.assert_passes(baseline=True)
+
+
 class MacroArtifactHardening(ValidatorCase):
     def test_fallback_failed_years_shape_is_strict(self):
         for bad_value in ("not-a-list", [], [True], [2026, 2026]):
@@ -1856,6 +2060,15 @@ class MacroArtifactHardening(ValidatorCase):
             "chg_pct": 0.0,
             "no_new_obs": True,
         })
+        block["alignment_observations"][0]["date"] = PRIOR_DATE
+        # VIXCLS still prints for 07-10, so the only shared date left is the
+        # trailing base itself: no window remains and the verdict must drop
+        # out rather than mix two timelines.
+        macro["vix_spx_comove"] = {
+            "status": "unavailable",
+            "comove": False,
+            "note": "no shared base observation",
+        }
         row = raw_row("valuation.sp500_trend", "sp500_trend")
         report = replace_once(
             make_report(), row, row.replace("| 2026-07-10 |", f"| {PRIOR_DATE} |")
@@ -1870,7 +2083,9 @@ class MacroArtifactHardening(ValidatorCase):
             "- 股市：7,575.39，持平 +0.42%。",
             "- 股市：7,575.39，持平 0.00%（無新觀測）。",
         )
-        self.assert_passes(report=report, macro=macro)
+        self.assert_passes(
+            report=comove_unavailable_report(report), macro=macro
+        )
 
     def test_move_nonnumeric_prior_fails(self):
         macro = macro_payload()

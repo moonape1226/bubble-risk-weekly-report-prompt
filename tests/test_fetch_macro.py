@@ -965,5 +965,153 @@ class OfrRepo(unittest.TestCase):
         self.assertEqual(blk["chg_pct"], 0.0)
 
 
+class VixSpxComove(unittest.TestCase):
+    """Derived VIX / S&P 500 co-movement block.
+
+    The window comes from the dates the two series share inside their bounded
+    alignment proofs, not from the prior-run date: FRED publishes SP500 one
+    business day ahead of VIXCLS.
+    """
+
+    LATEST = "2026-07-10"
+    BASE = "2026-07-02"          # 8 days back: inside the trailing window
+
+    def vix(self, latest=15.0, base=15.0, latest_date=None, base_date=None):
+        return {"VIXCLS": {
+            "status": "ok", "source": "FRED API",
+            "latest_date": latest_date or self.LATEST, "latest": latest,
+            "alignment_observations": [
+                {"date": latest_date or self.LATEST, "value": latest},
+                {"date": base_date or self.BASE, "value": base},
+            ],
+        }}
+
+    def sp500(self, latest=7575.39, base=7500.0, latest_date=None,
+              base_date=None):
+        return {
+            "status": "ok", "source": "FRED API",
+            "latest_date": latest_date or self.LATEST, "latest": latest,
+            "alignment_observations": [
+                {"date": latest_date or self.LATEST, "value": latest},
+                {"date": base_date or self.BASE, "value": base},
+            ],
+        }
+
+    def test_both_legs_rising_beyond_threshold_is_comove(self):
+        blk = fm.vix_spx_comove_block(self.vix(latest=17.0), self.sp500())
+        self.assertEqual(blk["status"], "ok")
+        self.assertTrue(blk["comove"])
+        self.assertEqual(blk["vix_chg_pct"], 13.33)
+        self.assertEqual(blk["sp500_chg_pct"], 1.01)
+        self.assertEqual(blk["as_of"], self.LATEST)
+        self.assertEqual(blk["base_date"], self.BASE)
+        self.assertEqual(blk["window_days"], 8)
+
+    def test_vix_rise_below_threshold_is_not_comove(self):
+        # +2.0% VIX clears zero but not calibration.vix_comove_chg_pct
+        blk = fm.vix_spx_comove_block(self.vix(latest=15.3), self.sp500())
+        self.assertEqual(blk["status"], "ok")
+        self.assertFalse(blk["comove"])
+        self.assertEqual(blk["vix_chg_pct"], 2.0)
+
+    def test_equity_leg_below_threshold_is_not_comove(self):
+        # VIX spiking while the index is flat is ordinary risk-off, not the
+        # crowded-optionality read this block exists to flag
+        blk = fm.vix_spx_comove_block(
+            self.vix(latest=18.0), self.sp500(latest=7502.0)
+        )
+        self.assertEqual(blk["status"], "ok")
+        self.assertFalse(blk["comove"])
+
+    def test_falling_equity_leg_is_not_comove(self):
+        blk = fm.vix_spx_comove_block(
+            self.vix(latest=18.0), self.sp500(latest=7200.0)
+        )
+        self.assertEqual(blk["status"], "ok")
+        self.assertFalse(blk["comove"])
+
+    def test_lagging_vix_publication_still_yields_a_window(self):
+        # the live failure mode: SP500 prints 07-13, VIXCLS only through 07-10
+        sp500 = self.sp500(latest_date="2026-07-13")
+        sp500["alignment_observations"] = [
+            {"date": "2026-07-13", "value": 7600.0},
+            {"date": self.LATEST, "value": 7575.39},
+            {"date": self.BASE, "value": 7500.0},
+        ]
+        blk = fm.vix_spx_comove_block(self.vix(latest=17.0), sp500)
+        self.assertEqual(blk["status"], "ok")
+        self.assertEqual(blk["as_of"], self.LATEST)   # newest SHARED date
+        self.assertEqual(blk["sp500"], 7575.39)
+        self.assertTrue(blk["comove"])
+
+    def test_failed_vix_series_is_unavailable(self):
+        blk = fm.vix_spx_comove_block(
+            {"VIXCLS": {"status": "fetch_failed", "source": None}}, self.sp500()
+        )
+        self.assertEqual(blk["status"], "unavailable")
+        self.assertFalse(blk["comove"])
+        self.assertNotIn("vix", blk)
+
+    def test_failed_sp500_block_is_unavailable(self):
+        blk = fm.vix_spx_comove_block(
+            self.vix(latest=17.0), {"status": "fetch_failed", "source": None}
+        )
+        self.assertEqual(blk["status"], "unavailable")
+
+    def test_no_shared_date_is_unavailable(self):
+        blk = fm.vix_spx_comove_block(
+            self.vix(latest=17.0, latest_date="2026-07-09",
+                     base_date="2026-07-01"),
+            self.sp500(),
+        )
+        self.assertEqual(blk["status"], "unavailable")
+        self.assertNotIn("vix_chg_pct", blk)
+
+    def test_no_shared_base_is_unavailable(self):
+        vix = self.vix(latest=17.0)
+        del vix["VIXCLS"]["alignment_observations"][1]
+        blk = fm.vix_spx_comove_block(vix, self.sp500())
+        self.assertEqual(blk["status"], "unavailable")
+
+    def test_base_older_than_twice_the_window_is_unavailable(self):
+        stale = "2026-06-20"     # 20 days > 2 x 7
+        blk = fm.vix_spx_comove_block(
+            self.vix(latest=17.0, base_date=stale),
+            self.sp500(base_date=stale),
+        )
+        self.assertEqual(blk["status"], "unavailable")
+
+    def test_base_at_the_window_edge_is_accepted(self):
+        edge = "2026-06-26"      # exactly 14 days back
+        blk = fm.vix_spx_comove_block(
+            self.vix(latest=17.0, base_date=edge),
+            self.sp500(base_date=edge),
+        )
+        self.assertEqual(blk["status"], "ok")
+        self.assertEqual(blk["window_days"], 14)
+
+    def test_nonpositive_base_is_unavailable(self):
+        blk = fm.vix_spx_comove_block(
+            self.vix(latest=17.0, base=0.0), self.sp500()
+        )
+        self.assertEqual(blk["status"], "unavailable")
+
+    def test_thresholds_come_from_the_contract(self):
+        contract = json.loads(
+            (REPO / "report_contract.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            fm.VIX_COMOVE_CHG_PCT, contract["calibration"]["vix_comove_chg_pct"]
+        )
+        self.assertEqual(
+            fm.VIX_COMOVE_TRAILING_DAYS,
+            contract["calibration"]["vix_comove_trailing_days"],
+        )
+        self.assertEqual(
+            fm.SP500_COMOVE_CHG_PCT,
+            contract["direction_thresholds"]["sp500_chg_pct"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

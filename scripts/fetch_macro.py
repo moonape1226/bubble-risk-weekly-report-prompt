@@ -5,8 +5,9 @@ Fetches FRED series (with EIA / US Treasury fallback) via urllib + a custom
 User-Agent, computes week-over-week deltas vs the prior-run date, and prints
 one JSON block to stdout. Also emits non-FRED blocks: cftc_lev_funds
 (leveraged-fund net position in UST futures), move_index (^MOVE via Yahoo
-chart endpoint), ofr_repo (OFR tri-party repo volume), and a derived
-repo_stress block (SOFR-IORB spreads + SRF usage). Never prints API keys.
+chart endpoint), ofr_repo (OFR tri-party repo volume), and the derived
+repo_stress (SOFR-IORB spreads + SRF usage) and vix_spx_comove (VIX and
+S&P 500 rising over the same window) blocks. Never prints API keys.
 stdlib only.
 
 Usage: python3 fetch_macro.py <prior_run_date YYYY-MM-DD | none>
@@ -27,6 +28,13 @@ try:
     MACRO_SCHEMA_VERSION = MACRO_SCHEMA["version"]
     DECOMPOSITION_IDENTITY_TOLERANCE_BPS = REPORT_CONTRACT["calibration"][
         "decomposition_identity_tolerance_bps"
+    ]
+    VIX_COMOVE_CHG_PCT = REPORT_CONTRACT["calibration"]["vix_comove_chg_pct"]
+    VIX_COMOVE_TRAILING_DAYS = REPORT_CONTRACT["calibration"][
+        "vix_comove_trailing_days"
+    ]
+    SP500_COMOVE_CHG_PCT = REPORT_CONTRACT["direction_thresholds"][
+        "sp500_chg_pct"
     ]
 except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
     raise SystemExit(f"ERROR: cannot load canonical report contract: {exc}")
@@ -393,7 +401,13 @@ def sp500_trend():
     res = {"status": "ok", "source": "FRED API",
            "latest_date": latest_date, "latest": latest,
            "ma200": ma200,
-           "dev200_pct": round((latest - ma200) / ma200 * 100, 2)}
+           "dev200_pct": round((latest - ma200) / ma200 * 100, 2),
+           # bounded proof so the derived vix_spx_comove window can be
+           # reproduced without refetching SP500
+           "alignment_observations": [
+               {"date": day, "value": round(value, 2)}
+               for day, value in obs[:32]
+           ]}
     if len(vals) >= 252:
         ma52w = round(sum(vals[:252]) / 252, 2)
         res["ma52w"] = ma52w
@@ -629,6 +643,66 @@ def repo_stress_block(series):
         return {"status": "partial", **rs}
     return {"status": "unavailable"}
 
+def vix_spx_comove_block(series, sp500):
+    """Derived VIX / S&P 500 co-movement block.
+
+    Equity and volatility normally move against each other; both rising over
+    the same window is the crowded-optionality warning read (hedging demand
+    bid up while the index still makes ground).
+
+    FRED publishes SP500 a business day ahead of VIXCLS, so a prior-run-date
+    delta degenerates to no_new_obs on most runs.  The window is therefore a
+    trailing ~7d pair taken from the dates the two series actually share,
+    read from the bounded proofs emitted with this artifact so the validator
+    can reproduce every selected leg. A co-movement claim assembled from two
+    different windows is never emitted.
+    """
+    def unavailable(note):
+        return {"status": "unavailable", "comove": False, "note": note}
+
+    vix = series.get("VIXCLS", {})
+    if vix.get("status") != "ok" or sp500.get("status") != "ok":
+        return unavailable("VIXCLS or sp500_trend unavailable")
+    vix_obs = {item["date"]: item["value"]
+               for item in vix.get("alignment_observations", [])}
+    sp500_obs = {item["date"]: item["value"]
+                 for item in sp500.get("alignment_observations", [])}
+    shared = sorted(set(vix_obs) & set(sp500_obs), reverse=True)
+    if not shared:
+        return unavailable("VIXCLS and sp500_trend share no observation date")
+    latest = shared[0]
+    target = (datetime.strptime(latest, "%Y-%m-%d")
+              - timedelta(days=VIX_COMOVE_TRAILING_DAYS)).strftime("%Y-%m-%d")
+    base = next((day for day in shared if day <= target), None)
+    if base is None:
+        return unavailable("no shared base observation at or before the "
+                           "trailing window target")
+    window_days = (datetime.strptime(latest, "%Y-%m-%d")
+                   - datetime.strptime(base, "%Y-%m-%d")).days
+    if window_days > VIX_COMOVE_TRAILING_DAYS * 2:
+        return unavailable("shared trailing base is older than twice the "
+                           "trailing window")
+    if vix_obs[base] <= 0 or sp500_obs[base] <= 0:
+        return unavailable("a trailing base level is not positive")
+    vix_chg_pct = round(
+        (vix_obs[latest] - vix_obs[base]) / vix_obs[base] * 100, 2)
+    sp500_chg_pct = round(
+        (sp500_obs[latest] - sp500_obs[base]) / sp500_obs[base] * 100, 2)
+    comove = (sp500_chg_pct >= SP500_COMOVE_CHG_PCT
+              and vix_chg_pct >= VIX_COMOVE_CHG_PCT)
+    return {"status": "ok", "as_of": latest, "base_date": base,
+            "window_days": window_days,
+            "vix": vix_obs[latest], "vix_base": vix_obs[base],
+            "vix_chg_pct": vix_chg_pct,
+            "sp500": sp500_obs[latest], "sp500_base": sp500_obs[base],
+            "sp500_chg_pct": sp500_chg_pct,
+            "comove": comove,
+            "note": (f"trailing ~{VIX_COMOVE_TRAILING_DAYS}d on the shared "
+                     "VIXCLS/SP500 timeline (publication lag differs; not "
+                     "aligned to the prior-run date); co-movement thresholds "
+                     f"S&P 500 ≥ +{SP500_COMOVE_CHG_PCT}%, "
+                     f"VIX ≥ +{VIX_COMOVE_CHG_PCT}%")}
+
 def decomposition_block(series, baseline=False):
     """10Y weekly-change decomposition. Rebuilding ΔT10YIE from the identity
     ΔDGS10 − ΔDFII10 is valid only when both legs cover the same window
@@ -750,6 +824,8 @@ def main():
                 out["series"]["T10YIE"] = blk
     out["decomposition"] = decomposition_block(
         out["series"], baseline=(PRIOR == "none"))
+    out["vix_spx_comove"] = vix_spx_comove_block(
+        out["series"], out["sp500_trend"])
     print("===MACRO_JSON_START===")
     print(json.dumps(out, ensure_ascii=False, indent=2, allow_nan=False))
     print("===MACRO_JSON_END===")
