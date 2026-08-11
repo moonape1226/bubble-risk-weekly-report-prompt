@@ -33,8 +33,11 @@ try:
     VIX_COMOVE_TRAILING_DAYS = REPORT_CONTRACT["calibration"][
         "vix_comove_trailing_days"
     ]
-    SP500_COMOVE_CHG_PCT = REPORT_CONTRACT["direction_thresholds"][
-        "sp500_chg_pct"
+    # Deliberately NOT direction_thresholds.sp500_chg_pct: that one is tuned
+    # for the ~3-4 day prior-run delta in the section-3 direction call, while
+    # this window is a ~7-14 day trailing pair.
+    SP500_COMOVE_CHG_PCT = REPORT_CONTRACT["calibration"][
+        "vix_comove_sp500_chg_pct"
     ]
 except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
     raise SystemExit(f"ERROR: cannot load canonical report contract: {exc}")
@@ -682,8 +685,12 @@ def vix_spx_comove_block(series, sp500):
     if window_days > VIX_COMOVE_TRAILING_DAYS * 2:
         return unavailable("shared trailing base is older than twice the "
                            "trailing window")
-    if vix_obs[base] <= 0 or sp500_obs[base] <= 0:
-        return unavailable("a trailing base level is not positive")
+    # Both ends of both legs: VIXCLS comes through the generic fred_obs path,
+    # which has no positivity filter, so a corrupted latest print would
+    # otherwise produce a nonsensical percentage instead of degrading.
+    if min(vix_obs[latest], vix_obs[base],
+           sp500_obs[latest], sp500_obs[base]) <= 0:
+        return unavailable("a co-movement leg level is not positive")
     vix_chg_pct = round(
         (vix_obs[latest] - vix_obs[base]) / vix_obs[base] * 100, 2)
     sp500_chg_pct = round(

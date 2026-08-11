@@ -124,8 +124,12 @@
     "term_premium_initial_delta_bps": 15,
     "decomposition_identity_tolerance_bps": 0.3,
     "vix_comove_chg_pct": 5,
+    "vix_comove_sp500_chg_pct": 0.5,
     "vix_comove_trailing_days": 7
   },
+  "macro_window_disclosures": [
+    {"source_id": "structural.vix_spx_comove", "dimension_key": "structural", "block": "vix_spx_comove", "fields": ["as_of", "base_date", "window_days"]}
+  ],
   "trigger_reason_codes": {
     "hy_oas_fired": {"state": "已擊發", "kind": "machine"},
     "private_credit_gate": {"state": "已擊發", "kind": "evidence", "source_ids": ["monetary.private_credit_liquidity"], "evidence_tag": "[private_credit_gate]", "window": "30d"},

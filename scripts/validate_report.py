@@ -176,6 +176,7 @@ def validate_contract(contract, failures):
         "tiers", "anchors", "anchor_feature_counts", "regimes",
         "trigger_states", "monetary_sides", "triangle_indicators",
         "triangle_labels", "triangle_fallbacks", "dimension_required_inputs",
+        "macro_window_disclosures",
         "triangle_chain_inputs", "historical_audit_labels",
         "direction_thresholds", "calibration", "trigger_reason_codes",
         "spv_deal_marker", "anchor_features", "score_schema",
@@ -308,6 +309,24 @@ def validate_contract(contract, failures):
                         or (requirement.get("indicator") is not None
                             and not isinstance(requirement["indicator"], str))):
                     failures.add("contract monetary input requirement is invalid")
+        disclosures = contract["macro_window_disclosures"]
+        dimension_keys = {dimension["key"] for dimension in dimensions}
+        if not isinstance(disclosures, list) or not disclosures:
+            failures.add("contract macro_window_disclosures is invalid")
+        else:
+            for disclosure in disclosures:
+                if (not isinstance(disclosure, dict)
+                        or set(disclosure) != {
+                            "source_id", "dimension_key", "block", "fields"}
+                        or disclosure["source_id"] not in source_ids
+                        or disclosure["dimension_key"] not in dimension_keys
+                        or disclosure["block"] not in macro_schema["required_blocks"]
+                        or not isinstance(disclosure["fields"], list)
+                        or not disclosure["fields"]
+                        or any(not isinstance(field, str) or not field
+                               for field in disclosure["fields"])
+                        or len(disclosure["fields"]) != len(set(disclosure["fields"]))):
+                    failures.add("contract macro window disclosure is invalid")
         chain_inputs = contract["triangle_chain_inputs"]
         if (not isinstance(chain_inputs, list) or len(chain_inputs) != 2
                 or [item.get("series") for item in chain_inputs]
@@ -862,7 +881,8 @@ def expected_comove_legs(macro, contract):
     window_days = (latest - base).days
     if window_days > trailing_days * 2:
         return None
-    if vix_levels[base] <= 0 or sp500_levels[base] <= 0:
+    if min(vix_levels[latest], vix_levels[base],
+           sp500_levels[latest], sp500_levels[base]) <= 0:
         return None
     vix_chg_pct = round(
         (vix_levels[latest] - vix_levels[base]) / vix_levels[base] * 100, 2)
@@ -875,8 +895,9 @@ def expected_comove_legs(macro, contract):
         "vix_chg_pct": vix_chg_pct,
         "sp500": sp500_levels[latest], "sp500_base": sp500_levels[base],
         "sp500_chg_pct": sp500_chg_pct,
-        "comove": (sp500_chg_pct >= contract["direction_thresholds"]["sp500_chg_pct"]
-                   and vix_chg_pct >= contract["calibration"]["vix_comove_chg_pct"]),
+        "comove": (
+            sp500_chg_pct >= contract["calibration"]["vix_comove_sp500_chg_pct"]
+            and vix_chg_pct >= contract["calibration"]["vix_comove_chg_pct"]),
     }
 
 
@@ -2756,6 +2777,13 @@ def validate_triangle(doc, score, summary, macro, prior, baseline, evidence,
     return trigger
 
 
+def discloses_value(text, value):
+    """True when a macro field's value is visible in report prose."""
+    if isinstance(value, str):
+        return value in text
+    return displayed_contains(text, value)
+
+
 def validate_dimensions(doc, score, prior, baseline, report_day, evidence,
                         macro, contract, failures):
     start = next((h[0] for h in doc.headings if h[3] == "## 六維度評分"), None)
@@ -2859,6 +2887,40 @@ def validate_dimensions(doc, score, prior, baseline, report_day, evidence,
                         f"dimension {dimension['name']} bullet value/date is not linked "
                         f"to appendix evidence for {source_id}"
                     )
+        for disclosure in contract["macro_window_disclosures"]:
+            if disclosure["dimension_key"] != dimension["key"]:
+                continue
+            macro_block = macro.get(disclosure["block"])
+            if (not isinstance(macro_block, dict)
+                    or macro_block.get("status") != "ok"):
+                continue
+            source_id = disclosure["source_id"]
+            matching = [
+                bullet for bullet in bullets
+                if re.search(
+                    rf"(?:^|[;；，,（(\s])source_ids=(?:"
+                    rf"[a-z][a-z0-9_.]*,)*{re.escape(source_id)}"
+                    rf"(?:,[a-z][a-z0-9_.]*)*(?=$|[^a-z0-9_.])",
+                    bullet,
+                )
+            ]
+            if len(matching) != 1:
+                failures.add(
+                    f"dimension {dimension['name']} needs one bullet disclosing "
+                    f"the {disclosure['block']} window for {source_id}"
+                )
+                continue
+            # The window is a trailing shared pair, not the report's usual
+            # per-run delta, so it is unreadable without every field.
+            undisclosed = [
+                field for field in disclosure["fields"]
+                if not discloses_value(matching[0], macro_block.get(field))
+            ]
+            if undisclosed:
+                failures.add(
+                    f"dimension {dimension['name']} bullet for {source_id} does not "
+                    f"disclose {disclosure['block']} fields: {undisclosed}"
+                )
         if dimension["key"] in contract["dimension_required_inputs"]:
             requirements = contract["dimension_required_inputs"][dimension["key"]]
             for requirement in requirements:

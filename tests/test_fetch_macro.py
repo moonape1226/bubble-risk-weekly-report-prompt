@@ -1096,6 +1096,21 @@ class VixSpxComove(unittest.TestCase):
         )
         self.assertEqual(blk["status"], "unavailable")
 
+    def test_nonpositive_latest_leg_is_unavailable(self):
+        # VIXCLS comes through the generic fred_obs path, which applies no
+        # positivity filter, so a corrupted latest print must degrade here
+        # rather than produce a -100% change
+        for legs in (
+            {"vix": self.vix(latest=0.0), "sp500": self.sp500()},
+            {"vix": self.vix(latest=-1.0), "sp500": self.sp500()},
+            {"vix": self.vix(latest=17.0), "sp500": self.sp500(latest=0.0)},
+        ):
+            with self.subTest(legs=legs):
+                blk = fm.vix_spx_comove_block(legs["vix"], legs["sp500"])
+                self.assertEqual(blk["status"], "unavailable")
+                self.assertFalse(blk["comove"])
+                self.assertNotIn("vix_chg_pct", blk)
+
     def test_thresholds_come_from_the_contract(self):
         contract = json.loads(
             (REPO / "report_contract.json").read_text(encoding="utf-8")
@@ -1107,9 +1122,11 @@ class VixSpxComove(unittest.TestCase):
             fm.VIX_COMOVE_TRAILING_DAYS,
             contract["calibration"]["vix_comove_trailing_days"],
         )
+        # deliberately not direction_thresholds.sp500_chg_pct: that key is
+        # calibrated for the shorter prior-run delta in the §3 direction call
         self.assertEqual(
             fm.SP500_COMOVE_CHG_PCT,
-            contract["direction_thresholds"]["sp500_chg_pct"],
+            contract["calibration"]["vix_comove_sp500_chg_pct"],
         )
 
 

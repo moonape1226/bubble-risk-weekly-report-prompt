@@ -464,6 +464,15 @@ def make_report(baseline=False):
                 "\n\n- PBoC：✗ NOT DISCLOSED；不納入計分"
                 "（source_ids=monetary.pboc）。"
             )
+        if key == "structural" and macro_payload(baseline)[
+                "vix_spx_comove"].get("status") == "ok":
+            comove = macro_payload(baseline)["vix_spx_comove"]
+            required_input_bullets = (
+                f"\n\n- **VIX / S&P 500 同漲** **{comove['vix']}**"
+                f"（{comove['as_of']}；base_date {comove['base_date']}，"
+                f"window_days {comove['window_days']}；FRED VIXCLS；"
+                "source_ids=structural.vix_spx_comove）——未同漲。"
+            )
         h3_blocks.append(
             f"### {index}. {name} — {score}（weight {weight}%，Δ {d_text}）\n\n"
             f"- **測試指標** **{evidence_value}**（{evidence_date}，"
@@ -1854,6 +1863,32 @@ class VixSpxComoveArtifact(ValidatorCase):
             "note": "no shared base observation",
         }
         self.assert_passes(report=comove_unavailable_report(), macro=macro)
+
+    def test_nonpositive_latest_leg_forces_unavailable(self):
+        macro = macro_payload()
+        macro["series"]["VIXCLS"]["alignment_observations"][0]["value"] = 0.0
+        macro["series"]["VIXCLS"]["latest"] = 0.0
+        self.assert_fails(macro=macro)
+
+    def test_dimension_bullet_must_disclose_every_window_field(self):
+        comove = macro_payload()["vix_spx_comove"]
+        for fragment in (
+            f"；base_date {comove['base_date']}",
+            f"，window_days {comove['window_days']}",
+        ):
+            with self.subTest(fragment=fragment):
+                self.assert_fails(
+                    report=replace_once(make_report(), fragment, "")
+                )
+
+    def test_dimension_needs_a_bullet_for_the_window_source(self):
+        source_id = "structural.vix_spx_comove"
+        report = make_report()
+        bullet = next(
+            line for line in report.splitlines()
+            if line.startswith("- ") and f"source_ids={source_id}" in line
+        )
+        self.assert_fails(report=replace_once(report, bullet + "\n\n", ""))
 
     def test_unavailable_block_cannot_be_certified_as_api_coverage(self):
         # the VIX level still fetched, but with no verdict the Coverage row
