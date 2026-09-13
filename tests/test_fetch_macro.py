@@ -1130,5 +1130,49 @@ class VixSpxComove(unittest.TestCase):
         )
 
 
+class CanonicalObservations(unittest.TestCase):
+    """Observations must never be dated after the execution date.
+
+    FRED dates administered-rate series (IORB) by rate-effective date, so a
+    weekend run can see a next-business-day print.  Emitting it would push
+    ``latest_date`` past ``generated_at`` and the pre-archive validator then
+    rejects the whole artifact.
+    """
+
+    def _today(self):
+        return fm.execution_now().strftime("%Y-%m-%d")
+
+    def _offset(self, days):
+        return (fm.execution_now() + fm.timedelta(days=days)).strftime("%Y-%m-%d")
+
+    def test_future_dated_observation_is_dropped(self):
+        obs = fm.canonical_observations([
+            (self._offset(1), 3.65),
+            (self._today(), 3.60),
+            (self._offset(-1), 3.55),
+        ])
+        self.assertEqual([day for day, _ in obs], [self._today(), self._offset(-1)])
+
+    def test_today_is_kept(self):
+        obs = fm.canonical_observations([(self._today(), 3.60)])
+        self.assertEqual(obs, [(self._today(), 3.60)])
+
+    def test_only_future_observations_yield_no_latest(self):
+        self.assertEqual(fm.canonical_observations([(self._offset(2), 3.65)]), [])
+
+    def test_conflicting_past_values_still_raise(self):
+        with self.assertRaises(ValueError):
+            fm.canonical_observations([
+                (self._offset(-1), 3.55), (self._offset(-1), 3.60),
+            ])
+
+    def test_conflict_beyond_the_cutoff_is_not_reached(self):
+        # Dropped before the ambiguity check: a future date is not an
+        # upstream data failure, it is simply not yet observable.
+        self.assertEqual(fm.canonical_observations([
+            (self._offset(1), 3.65), (self._offset(1), 3.70),
+        ]), [])
+
+
 if __name__ == "__main__":
     unittest.main()

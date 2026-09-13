@@ -107,14 +107,26 @@ def parsed_observation(day, value, *, positive=False):
 
 
 def canonical_observations(observations):
-    """Return newest-first, unique-date observations.
+    """Return newest-first, unique-date observations at or before today.
 
     Duplicate copies of the same print are harmless, but two different values
     for one date make alignment and delta selection ambiguous and are treated
     as an upstream schema/data failure.
+
+    Observations dated after the execution date are dropped.  FRED dates the
+    administered-rate series by rate-*effective* date, so IORB can carry an
+    observation one or more days ahead of the run (e.g. a Sunday run seeing
+    the Monday-effective rate).  Emitting it would put ``latest_date`` after
+    ``generated_at``, which the pre-archive validator rejects for the whole
+    artifact, and no observation the market has not reached yet may become a
+    reported current level or a delta endpoint.  ISO dates compare correctly
+    as strings, so this needs no re-parsing.
     """
+    cutoff = execution_now().strftime("%Y-%m-%d")
     by_date = {}
     for day, value in observations:
+        if day > cutoff:
+            continue
         if day in by_date and by_date[day] != value:
             raise ValueError(f"conflicting observations for {day}")
         by_date[day] = value
