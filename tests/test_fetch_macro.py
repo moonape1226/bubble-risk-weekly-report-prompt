@@ -105,6 +105,42 @@ class FredMalformedPayload(unittest.TestCase):
 
         self.assertEqual(block, {"status": "fetch_failed", "source": None})
 
+    def test_forward_dated_print_is_dropped(self):
+        """IORB publishes forward: a Sunday run must not cite Monday's level.
+
+        `generated_at` is the execution timestamp and the validator rejects a
+        `latest_date` after it, so keeping the forward print makes the whole
+        artifact unvalidatable.
+        """
+        today = fm.execution_now()
+        tomorrow = (today + fm.timedelta(days=1)).strftime("%Y-%m-%d")
+        today_str = today.strftime("%Y-%m-%d")
+        payload = {"observations": [
+            {"date": tomorrow, "value": "3.90"},
+            {"date": today_str, "value": "3.90"},
+            {"date": "2026-01-02", "value": "3.65"},
+        ]}
+        with mock.patch.object(fm, "PRIOR", "none"), \
+             mock.patch.object(fm, "_get", return_value=json.dumps(payload)):
+            block = fm.series_block("IORB", "pct")
+
+        self.assertEqual(block["status"], "ok")
+        self.assertEqual(block["latest_date"], today_str)
+        self.assertNotIn(
+            tomorrow,
+            [item["date"] for item in block.get("alignment_observations", [])],
+        )
+
+    def test_future_only_series_degrades_rather_than_reporting_it(self):
+        tomorrow = (fm.execution_now() + fm.timedelta(days=1)).strftime(
+            "%Y-%m-%d")
+        payload = {"observations": [{"date": tomorrow, "value": "3.90"}]}
+        with mock.patch.object(fm, "PRIOR", "none"), \
+             mock.patch.object(fm, "_get", return_value=json.dumps(payload)):
+            block = fm.series_block("IORB", "pct")
+
+        self.assertEqual(block["status"], "fetch_failed")
+
 
 class SeriesPolicies(unittest.TestCase):
     def setUp(self):

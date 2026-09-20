@@ -107,14 +107,25 @@ def parsed_observation(day, value, *, positive=False):
 
 
 def canonical_observations(observations):
-    """Return newest-first, unique-date observations.
+    """Return newest-first, unique-date observations dated on or before today.
 
     Duplicate copies of the same print are harmless, but two different values
     for one date make alignment and delta selection ambiguous and are treated
     as an upstream schema/data failure.
+
+    Observations dated after the Asia/Taipei execution date are dropped.
+    Administered-rate series publish forward: FRED carries IORB at the new
+    level through the next business day as soon as the FOMC sets it, so a
+    Sunday run sees a Monday-dated print.  `generated_at` is the execution
+    timestamp, and the validator rejects any `latest_date` after it, so
+    carrying a forward-dated print makes the artifact unvalidatable and
+    would also report a level that is not yet in effect on the report date.
     """
+    cutoff = execution_now().strftime("%Y-%m-%d")
     by_date = {}
     for day, value in observations:
+        if day > cutoff:
+            continue
         if day in by_date and by_date[day] != value:
             raise ValueError(f"conflicting observations for {day}")
         by_date[day] = value
