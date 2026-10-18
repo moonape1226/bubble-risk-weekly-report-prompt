@@ -112,9 +112,20 @@ def canonical_observations(observations):
     Duplicate copies of the same print are harmless, but two different values
     for one date make alignment and delta selection ambiguous and are treated
     as an upstream schema/data failure.
+
+    Observations dated after the execution date are dropped.  Administered
+    rates are published with a forward effective date -- after an FOMC move
+    FRED carries IORB / DFEDTARU / DFEDTARL at the new level effective the
+    next business day -- and adopting one as ``latest`` would both claim an
+    observation that has not happened yet and trip the validator's
+    ``latest_date is after generated_at`` artifact check.  The not-yet-
+    effective print is simply not an observation of today's level.
     """
+    cutoff = execution_now().strftime("%Y-%m-%d")
     by_date = {}
     for day, value in observations:
+        if day > cutoff:
+            continue
         if day in by_date and by_date[day] != value:
             raise ValueError(f"conflicting observations for {day}")
         by_date[day] = value
