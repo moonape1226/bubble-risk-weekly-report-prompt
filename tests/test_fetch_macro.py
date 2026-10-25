@@ -106,6 +106,38 @@ class FredMalformedPayload(unittest.TestCase):
         self.assertEqual(block, {"status": "fetch_failed", "source": None})
 
 
+class ForwardDatedObservations(unittest.TestCase):
+    """FRED serves administratively set rates through their next scheduled
+    change, so IORB carries a forward effective date.  The artifact must never
+    adopt it: the validator fails closed on a latest_date after generated_at.
+    """
+
+    def setUp(self):
+        fm.OBS_CACHE.clear()
+
+    def test_future_dated_observation_is_not_latest(self):
+        now = fm.datetime(2026, 10, 25, 9, 0, tzinfo=fm.TAIPEI_TZ)
+        payload = {"observations": [
+            {"date": "2026-10-26", "value": "3.9"},
+            {"date": "2026-10-25", "value": "3.9"},
+            {"date": "2026-10-22", "value": "3.9"},
+            {"date": "2026-10-18", "value": "3.9"},
+        ]}
+        with mock.patch.object(fm, "PRIOR", "2026-10-18"), \
+             mock.patch.object(fm, "execution_now", return_value=now), \
+             mock.patch.object(fm, "_get", return_value=json.dumps(payload)):
+            block = fm.series_block("IORB", "pct")
+
+        self.assertEqual(block["status"], "ok")
+        self.assertEqual(block["latest_date"], "2026-10-25")
+        self.assertEqual(block["prior_date"], "2026-10-18")
+        self.assertEqual(block["delta_bps"], 0.0)
+        self.assertNotIn(
+            "2026-10-26",
+            [obs["date"] for obs in block["alignment_observations"]],
+        )
+
+
 class SeriesPolicies(unittest.TestCase):
     def setUp(self):
         fm.OBS_CACHE.clear()

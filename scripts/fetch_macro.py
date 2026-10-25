@@ -112,9 +112,18 @@ def canonical_observations(observations):
     Duplicate copies of the same print are harmless, but two different values
     for one date make alignment and delta selection ambiguous and are treated
     as an upstream schema/data failure.
+
+    Observations dated after the Asia/Taipei execution date are dropped first.
+    Administratively set series carry a forward effective date -- FRED serves
+    IORB through the next scheduled change, so a Sunday run would otherwise
+    pick tomorrow's row as ``latest`` -- and the validator fails closed on any
+    ``latest_date`` after ``generated_at``.
     """
+    cutoff = execution_now().strftime("%Y-%m-%d")
     by_date = {}
     for day, value in observations:
+        if day > cutoff:
+            continue
         if day in by_date and by_date[day] != value:
             raise ValueError(f"conflicting observations for {day}")
         by_date[day] = value
