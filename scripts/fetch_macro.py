@@ -112,9 +112,19 @@ def canonical_observations(observations):
     Duplicate copies of the same print are harmless, but two different values
     for one date make alignment and delta selection ambiguous and are treated
     as an upstream schema/data failure.
+
+    Observations dated after the Asia/Taipei execution date are dropped.  Most
+    series are backward-looking, but an administered rate such as ``IORB``
+    publishes its next effective value ahead of the calendar, so FRED can
+    return a forward-dated row.  That row is a scheduled rate, not a current
+    observation: selecting it as ``latest`` would make the report cite a
+    future data date, which the pre-archive gate rejects outright.
     """
+    execution_day = execution_now().strftime("%Y-%m-%d")
     by_date = {}
     for day, value in observations:
+        if day > execution_day:
+            continue
         if day in by_date and by_date[day] != value:
             raise ValueError(f"conflicting observations for {day}")
         by_date[day] = value

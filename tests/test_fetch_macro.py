@@ -1132,3 +1132,45 @@ class VixSpxComove(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForwardDatedObservations(unittest.TestCase):
+    """An observation dated after the execution date is not a current print.
+
+    FRED publishes administered rates such as ``IORB`` with their next
+    effective date, so the newest row can sit in the future.  Reporting it as
+    ``latest`` would make every evidence row cite a future data date, which
+    the pre-archive gate rejects.
+    """
+
+    def test_future_dated_observation_is_dropped(self):
+        today = fm.execution_now()
+        tomorrow = (today + fm.timedelta(days=1)).strftime("%Y-%m-%d")
+        execution_day = today.strftime("%Y-%m-%d")
+        earlier = (today - fm.timedelta(days=3)).strftime("%Y-%m-%d")
+        result = fm.canonical_observations(
+            [(tomorrow, 3.9), (execution_day, 3.9), (earlier, 3.8)]
+        )
+        self.assertEqual(
+            result, [(execution_day, 3.9), (earlier, 3.8)]
+        )
+
+    def test_execution_day_observation_is_kept(self):
+        execution_day = fm.execution_now().strftime("%Y-%m-%d")
+        self.assertEqual(
+            fm.canonical_observations([(execution_day, 1.25)]),
+            [(execution_day, 1.25)],
+        )
+
+    def test_conflicting_future_rows_do_not_raise(self):
+        tomorrow = (fm.execution_now() + fm.timedelta(days=1)).strftime(
+            "%Y-%m-%d")
+        self.assertEqual(
+            fm.canonical_observations([(tomorrow, 1.0), (tomorrow, 2.0)]), []
+        )
+
+    def test_conflicting_past_rows_still_raise(self):
+        earlier = (fm.execution_now() - fm.timedelta(days=2)).strftime(
+            "%Y-%m-%d")
+        with self.assertRaises(ValueError):
+            fm.canonical_observations([(earlier, 1.0), (earlier, 2.0)])
