@@ -1,8 +1,9 @@
 """End-to-end contract tests for ``scripts/validate_report.py``.
 
-The golden reports deliberately contain every mandatory section and appendix
-table.  Negative tests mutate one invariant at a time.  stdlib only; no
-network and no dependency on the current wall clock.
+The golden report is a complete synthetic forecast report (conclusion,
+resolution block, three path sections, evidence sections, comparison, gaps,
+appendix, forecast JSON).  Negative tests mutate one invariant at a time and
+assert the specific failure.  stdlib only; no network and no wall clock.
 """
 
 import contextlib
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date, timedelta
 from unittest import mock
 from pathlib import Path
 
@@ -26,20 +28,21 @@ CONTRACT = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
 DATE = "2026-07-13"
 PRIOR_DATE = "2026-07-09"
+HORIZON_END = (date.fromisoformat(DATE) + timedelta(
+    days=CONTRACT["question"]["horizon_days"])).isoformat()
+PRIOR_HORIZON_END = (date.fromisoformat(PRIOR_DATE) + timedelta(
+    days=CONTRACT["question"]["horizon_days"])).isoformat()
 # 8 days before the 07-10 macro observation date: inside the trailing window
 COMOVE_BASE_DATE = "2026-07-02"
 TIMESTAMP = "2026-07-13T08:00:00+08:00"
 SEARCH_ID = "speculation.ai_rename_spac"
-
-CURRENT_SCORES = {
-    "valuation": 50,
-    "breadth": 40,
-    "speculation": 40,
-    "retail": 40,
-    "monetary": 40,
-    "structural": 40,
-}
-PRIOR_SCORES = {**CURRENT_SCORES, "valuation": 49}
+NDX_ID = "valuation.ndx_drawdown"
+# Optional sources promoted to successful DIRECT evidence in the golden so the
+# R3 path can cite a successful source.
+DIRECT_OPTIONAL = {"valuation.ai_credit_schism"}
+NDX_LATEST, NDX_HIGH, NDX_DRAWDOWN = 19950.0, 21000.0, 5.0
+RESOLUTION_BLOCK = CONTRACT["resolution"]["block"]
+DRY_BANNER = "> [DRY RUN] this report was not committed to archive."
 
 
 def load_validator_module():
@@ -51,26 +54,35 @@ def load_validator_module():
     return module
 
 
-def bar(score):
-    return "▰" * (score // 10) + "▱" * (10 - score // 10)
+def weekdays_descending(end, count):
+    days, day = [], date.fromisoformat(end)
+    while len(days) < count:
+        if day.weekday() < 5:
+            days.append(day.isoformat())
+        day -= timedelta(days=1)
+    return days
 
 
-def prior_score():
+def ndx_drawdown_block():
+    lookback = CONTRACT["macro_schema"]["ndx_drawdown"]["lookback_trading_days"]
+    days = weekdays_descending("2026-07-10", lookback)
+    window = []
+    for index, day in enumerate(days):
+        if index == 0:
+            value = NDX_LATEST
+        elif index == 100:
+            value = NDX_HIGH
+        else:
+            value = 19000.0 + (index % 7) * 10
+        window.append({"date": day, "value": value})
     return {
-        "date": PRIOR_DATE,
-        "iso_week": "2026-W28",
-        "weekday": "Thursday",
-        "timezone": "Asia/Taipei",
-        **PRIOR_SCORES,
-        # 49*.22 + five weighted 40s = 41.98 -> half-up 42.
-        "total": 42,
-        "tier": "警戒",
-        "regime": "穩定共存",
-        "trigger_state": "未擊發",
-        "trigger_reasons": [],
-        "monetary_side": "中性",
-        "hy_oas_widening_streak": 0,
-        "sp500_dev200_pct": 11.5,
+        "status": "ok", "source": "FRED API", "series": "NASDAQ100",
+        "latest_date": days[0], "latest": NDX_LATEST,
+        "high_date": days[100], "high": NDX_HIGH,
+        "drawdown_pct": NDX_DRAWDOWN,
+        "r1_threshold_pct": CONTRACT["resolution"]["r1"]["drawdown_pct"],
+        "r1_threshold_level": 15750.0, "r1_met": False,
+        "window_observations": window,
     }
 
 
@@ -107,8 +119,8 @@ def macro_payload(baseline=False):
         "yoy_pct": 3.0,
     })
     payload = {
-        "contract_version": 1,
-        "macro_schema_version": 1,
+        "contract_version": CONTRACT["version"],
+        "macro_schema_version": CONTRACT["macro_schema"]["version"],
         "generated_at": TIMESTAMP,
         "prior_run_date": "none" if baseline else PRIOR_DATE,
         "fred_key_present": True,
@@ -139,6 +151,7 @@ def macro_payload(baseline=False):
             "comove": False,
             "note": "trailing window; thresholds not met",
         },
+        "ndx_drawdown": ndx_drawdown_block(),
         "cftc_lev_funds": {
             "status": "ok", "source": "CFTC", "latest_date": "2026-07-10",
             "net_contracts": -500000,
@@ -208,22 +221,46 @@ def macro_payload(baseline=False):
     return payload
 
 
-def score_payload(baseline=False):
-    return {
+def forecast_payload(mode="forecast", answer="no", **overrides):
+    """Current forecast.  mode: forecast prior | legacy prior | baseline."""
+    flip = mode == "forecast" and answer != "no"
+    payload = {
         "date": DATE,
         "iso_week": "2026-W29",
         "weekday": "Monday",
         "timezone": "Asia/Taipei",
-        **CURRENT_SCORES,
-        "total": 42,
-        "tier": "警戒",
-        "regime": "基準日" if baseline else "穩定共存",
-        "trigger_state": "未擊發",
-        "trigger_reasons": [],
-        "monetary_side": "中性",
-        "hy_oas_widening_streak": 0,
-        "sp500_dev200_pct": 12.0,
+        "question_version": CONTRACT["question"]["version"],
+        "resolution_version": CONTRACT["resolution"]["version"],
+        "answer": answer,
+        "horizon_end": HORIZON_END,
+        "prior_date": None if mode == "baseline" else PRIOR_DATE,
+        "prior_answer": "no" if mode == "forecast" else None,
+        "flip_evidence": ["ai.hyperscaler_capex"] if flip else [],
+        "r1_drawdown_pct": NDX_DRAWDOWN,
+        "resolution": None,
     }
+    payload.update(overrides)
+    return payload
+
+
+def prior_forecast_payload(answer="no", **overrides):
+    payload = {
+        "date": PRIOR_DATE,
+        "iso_week": "2026-W28",
+        "weekday": "Thursday",
+        "timezone": "Asia/Taipei",
+        "question_version": CONTRACT["question"]["version"],
+        "resolution_version": CONTRACT["resolution"]["version"],
+        "answer": answer,
+        "horizon_end": PRIOR_HORIZON_END,
+        "prior_date": None,
+        "prior_answer": None,
+        "flip_evidence": [],
+        "r1_drawdown_pct": 4.5,
+        "resolution": None,
+    }
+    payload.update(overrides)
+    return payload
 
 
 def markdown_table(header, rows):
@@ -232,11 +269,13 @@ def markdown_table(header, rows):
     return "\n".join([header, separator, *rows])
 
 
-def coverage_block():
+def coverage_block(ndx_failed=False):
     rows = []
     for source in CONTRACT["sources"]:
         if source["id"] == SEARCH_ID:
             status = "✓ SEARCH-VERIFIED"
+        elif ndx_failed and source["id"] == NDX_ID:
+            status = "⛔ FETCH FAILED"
         elif source.get("macro"):
             status = "✓ API"
         elif source.get("window") == "composite":
@@ -244,7 +283,7 @@ def coverage_block():
                 "✗ NOT DISCLOSED components="
                 "quarterly_state:not_disclosed,event_scan:not_disclosed"
             )
-        elif not source["required"]:
+        elif not source["required"] and source["id"] not in DIRECT_OPTIONAL:
             status = "✗ NOT DISCLOSED"
         else:
             status = "✓ DIRECT"
@@ -254,12 +293,29 @@ def coverage_block():
     return markdown_table(CONTRACT["coverage_header"], rows)
 
 
-def raw_block():
+def ndx_raw_rows():
+    return [
+        f"| {NDX_ID} | ndx_drawdown latest 收盤 | {NDX_LATEST:.2f} | "
+        f"FRED NASDAQ100 (ndx_drawdown) | 2026-07-10 | {TIMESTAMP} |",
+        f"| {NDX_ID} | ndx_drawdown high 252 日最高收盤 | {NDX_HIGH:.2f} | "
+        f"FRED NASDAQ100 (ndx_drawdown) | {ndx_drawdown_block()['high_date']} | {TIMESTAMP} |",
+        f"| {NDX_ID} | ndx_drawdown drawdown_pct | {NDX_DRAWDOWN:.2f} | "
+        f"FRED NASDAQ100 (ndx_drawdown) | 2026-07-10 | {TIMESTAMP} |",
+    ]
+
+
+def raw_block(ndx_failed=False):
     macro = macro_payload()
     rows = []
     for source in CONTRACT["sources"]:
         source_id = source["id"]
-        if source_id == SEARCH_ID or (not source["required"] and not source.get("macro")):
+        optional = (not source["required"] and not source.get("macro")
+                    and source_id not in DIRECT_OPTIONAL)
+        if source_id == SEARCH_ID or optional:
+            continue
+        if source_id == NDX_ID:
+            if not ndx_failed:
+                rows.extend(ndx_raw_rows())
             continue
         binding = source.get("macro")
         if binding:
@@ -304,280 +360,123 @@ TRACE_ROW = (
 )
 TRACE_BLOCK = markdown_table(CONTRACT["traceability_header"], [TRACE_ROW])
 
+R1_TEXT = (
+    "NASDAQ-100 最新收盤 19,950.00（2026-07-10），252 個交易日收盤高點 21,000.00，"
+    f"距 52 週高點回撤 {NDX_DRAWDOWN:.2f}%；R1 門檻 15,750.00。`{NDX_ID}`"
+)
+R1_UNAVAILABLE_TEXT = "R1 回撤不可用——腳本未取得 NASDAQ100 日序資料"
 
-def anchor_audit(baseline=False):
-    hits = {
-        "1973.8",
-        "1997.1", "1997.2", "1997.3", "1997.5", "1997.6", "1997.8",
-        "1999.10",
-    }
-    no_data = set()
-    if baseline:
-        no_data.update({
-            "1973.4", "1973.5", "1973.6",
-            "1997.7", "1998.2", "1998.7", "1998.8",
-        })
-    else:
-        hits.update({"1973.4", "1997.7", "1998.8"})
-    lines = []
-    summaries = []
-    percentages = {}
-    for anchor in CONTRACT["anchors"]:
-        features = CONTRACT["anchor_features"][anchor]
-        count = 0
-        lines.append(f"**{anchor} feature audit**")
-        for feature in features:
-            feature_id = feature["id"]
-            if feature_id in hits:
-                status = "命中"
-                count += 1
-            elif feature_id in no_data:
-                status = "無資料"
-            else:
-                status = "未命中"
-            def evidence_ids(rule):
-                ids = set(rule.get("source_ids", []))
-                for child in rule.get("rules", []):
-                    ids.update(evidence_ids(child))
-                return ids
 
-            allowed = evidence_ids(feature["rule"])
-            source_text = "—"
-            available = [
-                source_id for source_id in sorted(allowed)
-                if next(item for item in CONTRACT["sources"]
-                        if item["id"] == source_id).get("macro")
-                or next(item for item in CONTRACT["sources"]
-                        if item["id"] == source_id)["required"]
-                or source_id == SEARCH_ID
+def make_report(mode="forecast", answer="no", ndx_failed=False, forecast=None):
+    """Complete golden report for a prior mode and answer."""
+    flip = mode == "forecast" and answer != "no"
+    forecast = forecast if forecast is not None else forecast_payload(mode, answer)
+    if ndx_failed and forecast.get("r1_drawdown_pct") == NDX_DRAWDOWN:
+        forecast = {**forecast, "r1_drawdown_pct": None}
+    prior_meta = "無（基準）" if mode == "baseline" else f"report-{PRIOR_DATE}（4天前）"
+    if mode == "forecast":
+        comparison = [
+            f"前次結論：no（report-{PRIOR_DATE}）",
+            "",
+            "本次結論：翻轉" if flip else "本次結論：維持",
+            "",
+        ]
+        if flip:
+            comparison += [
+                "翻轉依據：",
+                "- 四大雲端業者之一下修資本支出指引，見 `ai.hyperscaler_capex`，資料日期晚於前次預測。",
             ]
-            if allowed and not available:
-                status = "無資料"
-            elif allowed and status == "未命中":
-                source_text = available[0]
-            lines.append(
-                f"- {feature_id}｜{status}｜source_ids={source_text}｜contract feature audit"
-            )
-        total = len(features)
-        percentage = int(count * 100 / total / 5 + 0.5) * 5
-        percentages[anchor] = percentage
-        summaries.append(f"- {anchor}：命中 {count}/{total} = {percentage}%")
-    return percentages, summaries, lines
-
-
-def make_report(baseline=False):
-    previous = "—" if baseline else None
-    delta = "—" if baseline else None
-    s1_rows = []
-    for dimension in CONTRACT["dimensions"]:
-        name, key = dimension["name"], dimension["key"]
-        current = CURRENT_SCORES[key]
-        prior = previous if baseline else PRIOR_SCORES[key]
-        change = delta if baseline else current - PRIOR_SCORES[key]
-        change_cell = change if change in ("—", 0) else f"{change:+d}"
-        s1_rows.append(
-            f"| {name} | {bar(current)} | {current} | {prior} | {change_cell} |"
-        )
-    s1_rows.append(
-        f"| **加權總分** | {bar(42)} | **42【警戒】** | "
-        f"{'—' if baseline else 42} | {'—' if baseline else '0'} |"
-    )
-
-    percentages, audit_summaries, feature_lines = anchor_audit(baseline)
-    closest = max(CONTRACT["anchors"], key=lambda item: percentages[item])
-    similarities = [
-        (anchor, percentages[anchor], "◀ 最貼近" if anchor == closest else "")
-        for anchor in CONTRACT["anchors"]
-    ]
-    s2_rows = [
-        f"| {name} | {pct}% | {bar(pct)} | {mark} |"
-        for name, pct, mark in similarities
-    ]
-
-    if baseline:
-        meta_prior = "基準日"
-        total_delta = "—"
-        s3_rows = [
-            "| S&P 500 | 7,575.39 | 基準日（無前次可比） |",
-            "| WTI 原油 | $69.60 /bbl | 基準日（無前次可比） |",
-            "| 10Y Treasury | 4.54% | 基準日（無前次可比） |",
+        else:
+            comparison += ["- 自前次預測以來無足以改變結論的新證據。"]
+    elif mode == "legacy":
+        comparison = [
+            f"前次結論：無前次預測（report-{PRIOR_DATE} 為舊格式評分報告）",
+            "",
+            "- 前次為評分報告，不轉換為 yes/no。",
         ]
-        regime = "基準日"
-        transition = "前次無格局紀錄；本次為基準日。"
-        decomposition = "判定 基準日。"
-        decomposition_bullets = (
-            "- ΔDGS10 名目殖利率週變動：基準日\n"
-            "- ΔDFII10 實質殖利率週變動：基準日\n"
-            "- ΔT10YIE 損益平衡通膨週變動：基準日"
-        )
-        new_signal = "基準日；無前次可比。"
     else:
-        meta_prior = f"report-{PRIOR_DATE}（4天前）"
-        total_delta = "0"
-        s3_rows = [
-            "| S&P 500 | 7,575.39 | 持平（+0.42%；前次 7,543.64） |",
-            "| WTI 原油 | $69.60 /bbl | 持平（0.00%；前次 $69.60） |",
-            "| 10Y Treasury | 4.54% | 持平（0.0 bps；前次 4.54%） |",
-        ]
-        regime = "穩定共存"
-        transition = "穩定共存 → 穩定共存。"
-        decomposition = "判定 無變動。"
-        decomposition_bullets = (
-            "- ΔDGS10 名目殖利率週變動：0.0 bps\n"
-            "- ΔDFII10 實質殖利率週變動：0.0 bps\n"
-            "- ΔT10YIE 損益平衡通膨週變動：0.0 bps"
-        )
-        new_signal = "vs 前次（4天前）\n\n- 估值溢價較前次上升 1 分。"
-
-    h3_blocks = []
-    for index, dimension in enumerate(CONTRACT["dimensions"], 1):
-        name, key, weight = dimension["name"], dimension["key"], dimension["weight"]
-        score = CURRENT_SCORES[key]
-        d = "—" if baseline else score - PRIOR_SCORES[key]
-        d_text = d if d in ("—", 0) else f"{d:+d}"
-        conclusion = (
-            "中性；信用環境位於測試區間。"
-            if key == "monetary"
-            else "本次位於測試 rubric 區間，依契約計分。"
-        )
-        evidence_source = [
-            "valuation.sp500_pe_cape",
-            "breadth.rsp_spy",
-            "speculation.ipo_heat",
-            "retail.fear_greed",
-            "monetary.hy_oas",
-            "structural.zero_dte",
-        ][index - 1]
-        evidence_date = "2026-07-12" if key == "speculation" else "2026-07-10"
-        evidence_value = 2.8 if key == "monetary" else 1
-        required_input_bullets = ""
-        if key == "monetary":
-            required_input_bullets = (
-                "\n\n- BAMLC0A0CM **0.85**（2026-07-10，FRED BAMLC0A0CM；"
-                "source_ids=monetary.ig_oas）——IG OAS 輸入。"
-                "\n\n- WALCL **6800000.0**（2026-07-10，FRED WALCL；"
-                "source_ids=monetary.walcl）——Fed 資產負債表輸入。"
-                "\n\n- ECBASSETSW **7000000.0**（2026-07-10，FRED ECBASSETSW；"
-                "source_ids=monetary.ecb_boj）——ECB 流動性輸入。"
-                "\n\n- JPNASSETS **7500000.0**（2026-07-10，FRED JPNASSETS；"
-                "source_ids=monetary.ecb_boj）——BOJ 流動性輸入。"
-                "\n\n- PBoC：✗ NOT DISCLOSED；不納入計分"
-                "（source_ids=monetary.pboc）。"
-            )
-        if key == "structural" and macro_payload(baseline)[
-                "vix_spx_comove"].get("status") == "ok":
-            comove = macro_payload(baseline)["vix_spx_comove"]
-            required_input_bullets = (
-                f"\n\n- **VIX / S&P 500 同漲** **{comove['vix']}**"
-                f"（{comove['as_of']}；base_date {comove['base_date']}，"
-                f"window_days {comove['window_days']}；FRED VIXCLS；"
-                "source_ids=structural.vix_spx_comove）——未同漲。"
-            )
-        h3_blocks.append(
-            f"### {index}. {name} — {score}（weight {weight}%，Δ {d_text}）\n\n"
-            f"- **測試指標** **{evidence_value}**（{evidence_date}，"
-            f"https://example.com/{evidence_source}；source_ids={evidence_source}）"
-            "——可稽核輸入。"
-            f"{required_input_bullets}\n\n"
-            f"**結論**：{conclusion}"
-        )
-
-    weighted_rows = []
-    weighted_total = 0
-    for dimension in CONTRACT["dimensions"]:
-        name, key, weight = dimension["name"], dimension["key"], dimension["weight"]
-        component = CURRENT_SCORES[key] * weight / 100
-        weighted_total += component
-        weighted_rows.append(
-            f"| {name} | {weight}% | {CURRENT_SCORES[key]} | {component:.2f} |"
-        )
-
-    score_json = json.dumps(score_payload(baseline), ensure_ascii=False, indent=2)
-    return f"""# {DATE} 市場泡沫風險評估報告
-> 報告日期：{DATE}；執行日：{DATE} Asia/Taipei；ISO 週次：2026-W29；前次基準：{meta_prior}
-
-**總評**：總分 42【警戒】（Δ {total_delta}）；扳機狀態：未擊發；最貼近錨點：{closest}（{percentages[closest]}%）。
-
-## §1 六維度風險條圖
-
-{markdown_table(CONTRACT['section1_header'], s1_rows)}
-
-## §2 歷史錨點相似度
-
-{markdown_table(CONTRACT['section2_header'], s2_rows)}
-
-## §3 三角訊號
-
-{markdown_table(CONTRACT['section3_header'], s3_rows)}
-
-**三者狀態**：{regime}
-
-- 股市：{'7,575.39，基準日，無前次可比。' if baseline else '7,575.39，持平 +0.42%。'}
-- WTI 原油：{'69.60，基準日，無前次可比。' if baseline else '69.60，持平 0.00%。'}
-- 10Y 殖利率：{'4.54，基準日，無前次可比。' if baseline else '4.54，持平 0.0 bps。'}
-
-**格局轉變**：{transition}
-
-**10Y 成因拆解**：{decomposition}
-
-{decomposition_bullets}
-
-**扳機鏈**：A 通膨鏈未啟動；[monetary.cpi_yoy] CPIAUCSL yoy_pct=3.0 data_date=2026-07-10；[monetary.t5yifr] T5YIFR latest=2.2 delta_bps={'基準日' if baseline else '0.0'} data_date=2026-07-10；B 槓桿鏈未啟動。
-
-**扳機理由**：none
-
-**結論**：扳機狀態：未擊發——目前未見決定性觸發。
-
-## 六維度評分
-
-{chr(10).join(chr(10) + block for block in h3_blocks).lstrip()}
-
-## 綜合分數
-
-{markdown_table(CONTRACT['weighted_score_header'], weighted_rows)}
-
-加權總分：{weighted_total:.2f} → 42【警戒】
-
-## 歷史泡沫週期對比
-
-相似度計算：checklist v2
-
-{chr(10).join(audit_summaries)}
-
-2000/3 高位回落條件：否
-
-{chr(10).join(feature_lines)}
-
-## 機構情緒對照
-
-本次無新機構調查數據。
-
-## 本次新增訊號
-
-{new_signal}
-
-## 數據附錄
-
-### Raw data
-
-{RAW_BLOCK}
-
-### Coverage
-
-{coverage_block()}
-
-### SEARCH-VERIFIED traceability
-
-{TRACE_BLOCK}
-
-## 本次分數存檔
-
-```json
-{score_json}
-```
-
-{CONTRACT['disclaimer']}
-"""
+        comparison = ["前次結論：無前次（基準）", "", "- 基準日，無比較對象。"]
+    r1 = R1_UNAVAILABLE_TEXT if ndx_failed else R1_TEXT
+    gaps = (
+        [f"- `{NDX_ID}` 為 FETCH FAILED，缺口不影響 R2、R3 的判斷。"]
+        if ndx_failed else ["本次無 FETCH FAILED 來源"]
+    )
+    lines = [
+        f"# {DATE} AI 泡沫破裂預測報告",
+        f"報告日期：{DATE}｜ISO 週次：2026-W29｜預測窗口：{DATE} → {HORIZON_END}"
+        f"｜前次基準：{prior_meta}",
+        "",
+        "## 結論",
+        CONTRACT["conclusion_line"][answer],
+        "",
+        "三條路徑皆未接近解析條件，市場回撤與資本支出指引均無破裂訊號。",
+        "",
+        "## 解析條件",
+        RESOLUTION_BLOCK,
+        "",
+        f"解析版本：v{CONTRACT['resolution']['version']}",
+        "",
+        "## 三條路徑現況",
+        "",
+        "### R1 市場回撤",
+        r1,
+        "",
+        "**判讀：** 距離門檻仍遠，窗口內需再下跌約兩成才會觸發。",
+        "",
+        "### R2 資本支出收縮",
+        "四家業者最新指引皆為上修。`ai.hyperscaler_capex`",
+        "",
+        "**判讀：** 尚無任何一家下修，距離至少兩家下修的條件很遠。",
+        "",
+        "### R3 AI 信用事件",
+        "目前未見符合規模的借款人違約。`valuation.ai_credit_schism`",
+        "",
+        "**判讀：** 信用定價平穩，窗口內需出現違約或 distressed exchange 才會觸發。",
+        "",
+        "## 支持 yes 的證據",
+        "",
+        "- [R3] AI 信用定價出現分歧，部分借款人利差擴大。`valuation.ai_credit_schism`",
+        "",
+        "## 支持 no 的證據",
+        "",
+        f"- [R1] 距 52 週高點回撤僅 {NDX_DRAWDOWN:.2f}%。`{NDX_ID}`"
+        if not ndx_failed else
+        "- [R2] 四家業者資本支出指引皆未下修。`ai.hyperscaler_capex`",
+        "- [整體] 資本支出指引維持上修。`ai.hyperscaler_capex`",
+        "",
+        "## 與前期比較",
+        "",
+        *comparison,
+        "",
+        "## 資料缺漏與不確定性",
+        "",
+        *gaps,
+        "- 下一次財報日期尚未公布，可能使 R2 提前出現下修。",
+        "",
+        "## 數據附錄",
+        "",
+        "### Raw data",
+        "",
+        raw_block(ndx_failed),
+        "",
+        "### Coverage",
+        "",
+        coverage_block(ndx_failed),
+        "",
+        "### SEARCH-VERIFIED traceability",
+        "",
+        TRACE_BLOCK,
+        "",
+        "## 本次預測存檔",
+        "",
+        "```json",
+        json.dumps(forecast, ensure_ascii=False, indent=2),
+        "```",
+        "",
+        CONTRACT["disclaimer"],
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def replace_once(text, old, new):
@@ -604,6 +503,12 @@ def raw_row(source_id, component=None):
     return rows[0]
 
 
+def ndx_failed_macro(baseline=False):
+    macro = macro_payload(baseline)
+    macro["ndx_drawdown"] = {"status": "fetch_failed", "source": "FRED API"}
+    return macro
+
+
 def comove_unavailable_report(report=None):
     """Degrade the co-movement Coverage row and drop its derived Raw row."""
     source_id = "structural.vix_spx_comove"
@@ -612,87 +517,10 @@ def comove_unavailable_report(report=None):
         report if report is not None else make_report(),
         coverage, coverage.replace("✓ API", "⛔ FETCH FAILED"),
     )
+    report = replace_once(
+        report, "本次無 FETCH FAILED 來源",
+        f"- `{source_id}` 為 FETCH FAILED，缺口不影響三條路徑的判斷。")
     return replace_once(report, raw_row(source_id, "| vix_spx_comove |") + "\n", "")
-
-
-def wti_search_fallback_fixture(marker=None):
-    value = 70.25
-    marker = marker or f"[triangle_fallback] DCOILWTICO fallback_value={value}"
-    macro = macro_payload()
-    macro["series"]["DCOILWTICO"] = {
-        "status": "fetch_failed",
-        "source": None,
-    }
-    report = make_report()
-    coverage = coverage_row("monetary.wti")
-    report = replace_once(
-        report, coverage,
-        coverage.replace("✓ API", "✓ SEARCH-VERIFIED"),
-    )
-    report = replace_once(
-        report, raw_row("monetary.wti", "DCOILWTICO") + "\n", ""
-    )
-    report = replace_once(
-        report,
-        "- 1973.5｜未命中｜source_ids=—｜contract feature audit",
-        "- 1973.5｜無資料｜source_ids=—｜contract feature audit",
-    )
-    fallback_trace = (
-        f"| monetary.wti | {marker} | DCOILWTICO current spot search | "
-        f"https://example.com/wti-fallback | 2026-07-12 | {TIMESTAMP} |"
-    )
-    report = replace_once(report, TRACE_ROW, TRACE_ROW + "\n" + fallback_trace)
-    report = replace_once(
-        report,
-        "| WTI 原油 | $69.60 /bbl | 持平（0.00%；前次 $69.60） |",
-        f"| WTI 原油 | ${value:.2f} /bbl | — |",
-    )
-    report = replace_once(
-        report,
-        "- WTI 原油：69.60，持平 0.00%。",
-        f"- WTI 原油：{value:.2f}，方向不可用。",
-    )
-    report = replace_once(
-        report, "**三者狀態**：穩定共存", "**三者狀態**：不可判"
-    )
-    report = replace_once(
-        report,
-        "**格局轉變**：穩定共存 → 穩定共存。",
-        "**格局轉變**：穩定共存 → 不可判。",
-    )
-    report = replace_once(
-        report, '"regime": "穩定共存"', '"regime": "不可判"'
-    )
-    current = score_payload()
-    current["regime"] = "不可判"
-    return report, macro, current
-
-
-def ig_oas_search_fallback_fixture(marker, bullet_value):
-    macro = macro_payload()
-    macro["series"]["BAMLC0A0CM"] = {
-        "status": "fetch_failed", "source": None,
-    }
-    report = make_report()
-    coverage = coverage_row("monetary.ig_oas")
-    report = replace_once(
-        report, coverage,
-        coverage.replace("✓ API", "✓ SEARCH-VERIFIED"),
-    )
-    report = replace_once(
-        report, raw_row("monetary.ig_oas", "BAMLC0A0CM") + "\n", ""
-    )
-    trace = (
-        f"| monetary.ig_oas | {marker} | BAMLC0A0CM current OAS | "
-        f"https://example.com/ig-oas | 2026-07-10 | {TIMESTAMP} |"
-    )
-    report = replace_once(report, TRACE_ROW, TRACE_ROW + "\n" + trace)
-    report = replace_once(
-        report,
-        "BAMLC0A0CM **0.85**（2026-07-10",
-        f"BAMLC0A0CM **{bullet_value}**（2026-07-10",
-    )
-    return report, macro
 
 
 def spv_event_item(omit=(), **overrides):
@@ -749,23 +577,29 @@ class ValidatorCase(unittest.TestCase):
         self,
         report=None,
         *,
+        mode="forecast",
+        answer="no",
         baseline=False,
-        prior=None,
         macro=None,
         macro_text=None,
-        current_score=None,
+        current_forecast=None,
+        prior_forecast=None,
         prompt_text=None,
         dry_run=False,
         macro_markers=True,
         extra_args=(),
         include_required_args=True,
+        prior_flag=True,
     ):
+        if baseline:
+            mode = "baseline"
         generated_report = report is None
-        report = make_report(baseline) if generated_report else report
+        report = make_report(mode, answer) if generated_report else report
         if dry_run and generated_report:
-            report = "> [DRY RUN] this report was not committed to archive.\n\n" + report
-        macro = macro_payload(baseline) if macro is None else macro
-        current_score = score_payload(baseline) if current_score is None else current_score
+            report = DRY_BANNER + "\n\n" + report
+        macro = macro_payload(mode == "baseline") if macro is None else macro
+        if current_forecast is None:
+            current_forecast = forecast_payload(mode, answer)
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             report_path = root / "report.md"
@@ -773,7 +607,7 @@ class ValidatorCase(unittest.TestCase):
             contract_path = root / "report_contract.json"
             macro_path = root / "macro.json"
             prior_path = root / "prior.json"
-            current_path = root / "current-score.json"
+            current_path = root / "current-forecast.json"
             report_path.write_text(report, encoding="utf-8")
             prompt_path.write_text(
                 PROMPT.read_text(encoding="utf-8") if prompt_text is None else prompt_text,
@@ -783,7 +617,6 @@ class ValidatorCase(unittest.TestCase):
                 json.dumps(CONTRACT, ensure_ascii=False), encoding="utf-8"
             )
             if macro_text is None:
-                # Exercise acceptance of the fetcher's marker-delimited output.
                 macro_json = json.dumps(macro, ensure_ascii=False, indent=2)
                 macro_text = (
                     "===MACRO_JSON_START===\n" + macro_json
@@ -792,7 +625,7 @@ class ValidatorCase(unittest.TestCase):
                 )
             macro_path.write_text(macro_text, encoding="utf-8")
             current_path.write_text(
-                json.dumps(current_score, ensure_ascii=False, indent=2),
+                json.dumps(current_forecast, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             argv = [sys.executable, str(VALIDATOR), str(report_path)]
@@ -801,20 +634,23 @@ class ValidatorCase(unittest.TestCase):
                     "--prompt", str(prompt_path),
                     "--contract", str(contract_path),
                     "--macro-json", str(macro_path),
-                    "--current-score", str(current_path),
+                    "--current-forecast", str(current_path),
                     "--dry-run" if dry_run else "--production",
                 ]
-                if baseline:
-                    argv.append("--baseline")
-                else:
-                    prior_path.write_text(
-                        json.dumps(prior_score() if prior is None else prior,
-                                   ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                    argv += ["--prior-score", str(prior_path)]
+                if prior_flag:
+                    if mode == "forecast":
+                        prior_path.write_text(
+                            json.dumps(
+                                prior_forecast_payload()
+                                if prior_forecast is None else prior_forecast,
+                                ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        argv += ["--prior-forecast", str(prior_path)]
+                    else:
+                        argv.append("--no-prior-forecast")
             argv += list(extra_args)
-            return subprocess.run(argv, capture_output=True, text=True, timeout=20)
+            return subprocess.run(argv, capture_output=True, text=True, timeout=30)
 
     def assert_passes(self, **kwargs):
         proc = self.run_validator(**kwargs)
@@ -822,341 +658,38 @@ class ValidatorCase(unittest.TestCase):
         self.assertIn("PASS", proc.stdout)
         self.assertNotIn("Traceback", proc.stdout + proc.stderr)
 
-    def assert_fails(self, **kwargs):
+    def assert_fails(self, contains=None, **kwargs):
         proc = self.run_validator(**kwargs)
         self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("FAIL", proc.stdout)
         self.assertNotIn("Traceback", proc.stdout + proc.stderr)
+        if contains is not None:
+            self.assertIn(contains, proc.stdout, proc.stdout)
 
 
 class GoldenReports(ValidatorCase):
-    def test_complete_prior_mode_report_passes(self):
+    def test_forecast_prior_maintain_passes_in_both_run_modes(self):
         self.assert_passes()
+        self.assert_passes(dry_run=True)
 
-    def test_complete_baseline_report_passes(self):
+    def test_forecast_prior_flip_passes_in_both_run_modes(self):
+        self.assert_passes(answer="yes")
+        self.assert_passes(answer="yes", dry_run=True)
+
+    def test_legacy_prior_passes_in_both_run_modes(self):
+        self.assert_passes(mode="legacy")
+        self.assert_passes(mode="legacy", dry_run=True)
+
+    def test_baseline_passes_in_both_run_modes(self):
         self.assert_passes(baseline=True)
+        self.assert_passes(baseline=True, dry_run=True)
 
-    def test_zero_result_search_trace_exception_passes(self):
-        report = make_report()
-        row = coverage_row(SEARCH_ID)
-        report = replace_once(
-            report, row, row.replace("✓ SEARCH-VERIFIED", "✓ SEARCH-VERIFIED（0 件）")
-        )
-        report = replace_once(
-            report,
-            TRACE_ROW,
-            f"| {SEARCH_ID} | AI rename zero-result screen | AI rename past 7 days | "
-            f"SEC and Nasdaq checked; 0 qualifying results | — | {TIMESTAMP} |",
-        )
-        self.assert_passes(report=report)
-
-
-class FetcherValidatorIntegration(ValidatorCase):
-    def test_fetcher_main_exact_stdout_envelope_passes_validator(self):
-        spec = importlib.util.spec_from_file_location(
-            "fetch_macro_validator_integration", REPO / "scripts" / "fetch_macro.py"
-        )
-        fetch_macro = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(fetch_macro)
-        expected = macro_payload()
-        output = io.StringIO()
-
-        def mocked_series(series_id, _unit):
-            return copy.deepcopy(expected["series"][series_id])
-
-        fixed_now = fetch_macro.datetime.fromisoformat(TIMESTAMP)
-        with (
-            mock.patch.object(fetch_macro, "PRIOR", PRIOR_DATE),
-            mock.patch.object(fetch_macro, "FRED_KEY", "test-key-present"),
-            mock.patch.object(fetch_macro, "EIA_KEY", ""),
-            mock.patch.object(fetch_macro, "execution_now", return_value=fixed_now),
-            mock.patch.object(fetch_macro, "series_block", side_effect=mocked_series),
-            mock.patch.object(
-                fetch_macro, "sp500_trend",
-                return_value=copy.deepcopy(expected["sp500_trend"]),
-            ),
-            mock.patch.object(
-                fetch_macro, "cftc_lev_funds",
-                return_value=copy.deepcopy(expected["cftc_lev_funds"]),
-            ),
-            mock.patch.object(
-                fetch_macro, "move_index",
-                return_value=copy.deepcopy(expected["move_index"]),
-            ),
-            mock.patch.object(
-                fetch_macro, "ofr_repo",
-                return_value=copy.deepcopy(expected["ofr_repo"]),
-            ),
-            mock.patch.object(
-                fetch_macro, "repo_stress_block",
-                return_value=copy.deepcopy(expected["repo_stress"]),
-            ),
-            mock.patch.object(
-                fetch_macro, "decomposition_block",
-                return_value=copy.deepcopy(expected["decomposition"]),
-            ),
-            contextlib.redirect_stdout(output),
-        ):
-            fetch_macro.main()
-
-        macro_text = output.getvalue()
-        self.assertTrue(macro_text.startswith("===MACRO_JSON_START===\n"))
-        self.assertTrue(macro_text.endswith("\n===MACRO_JSON_END===\n"))
-        self.assert_passes(macro_text=macro_text)
-
-
-class MarkdownSectionAwareness(ValidatorCase):
-    def test_tilde_fence_content_is_excluded_from_ascii_tilde_scan(self):
-        validator = load_validator_module()
-        failures = validator.Failures()
-        doc = validator.MarkdownDocument(
-            "~~~text\ninside ~ is code\n~~~\n\n" + CONTRACT["disclaimer"],
-            failures,
-        )
-        validator.validate_global_security(doc, CONTRACT, failures)
-        self.assertEqual(failures.items, [])
-
-    def test_raw_table_in_wrong_section_fails(self):
-        report = replace_once(make_report(), RAW_BLOCK, "Raw data moved below.")
-        report = replace_once(report, "## 本次新增訊號\n", f"## 本次新增訊號\n\n{RAW_BLOCK}\n")
-        self.assert_fails(report=report)
-
-    def test_score_json_in_wrong_section_fails(self):
-        score_fence = "```json\n" + json.dumps(score_payload(), ensure_ascii=False, indent=2) + "\n```"
-        report = replace_once(make_report(), score_fence, "分數區塊遺失。")
-        report = replace_once(report, "## 數據附錄\n", f"## 數據附錄\n\n{score_fence}\n")
-        self.assert_fails(report=report)
-
-    def test_fenced_raw_table_does_not_count(self):
-        report = replace_once(make_report(), RAW_BLOCK, f"```text\n{RAW_BLOCK}\n```")
-        self.assert_fails(report=report)
-
-    def test_fenced_heading_does_not_count(self):
-        report = replace_once(
-            make_report(),
-            "## 機構情緒對照",
-            "```text\n## 機構情緒對照\n```",
-        )
-        self.assert_fails(report=report)
-
-    def test_indented_code_table_does_not_count(self):
-        indented = "\n".join("    " + line for line in RAW_BLOCK.splitlines())
-        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, indented))
-
-    def test_raw_html_wrapped_table_fails(self):
-        wrapped = f"<script type=\"text/plain\">\n{RAW_BLOCK}\n</script>"
-        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, wrapped))
-
-    def test_incomplete_script_start_cannot_hide_table(self):
-        wrapped = f"<script\n{RAW_BLOCK}\n</script>"
-        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, wrapped))
-
-    def test_cdata_wrapped_table_fails(self):
-        wrapped = f"<![CDATA[\n{RAW_BLOCK}\n]]>"
-        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, wrapped))
-
-    def test_multiline_inline_code_cannot_hide_table(self):
-        wrapped = f"`\n{RAW_BLOCK}\n`"
-        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, wrapped))
-
-    def test_four_space_closing_fence_fails(self):
-        report = replace_once(
-            make_report(),
-            "\n```\n\n" + CONTRACT["disclaimer"],
-            "\n    ```\n\n" + CONTRACT["disclaimer"],
-        )
-        self.assert_fails(report=report)
-
-    def test_comment_hidden_checklist_does_not_count(self):
-        report = replace_once(
-            make_report(),
-            "相似度計算：checklist v2",
-            "<!-- 相似度計算：checklist v2 -->",
-        )
-        self.assert_fails(report=report)
-
-    def test_setext_heading_syntax_is_rejected(self):
-        report = replace_once(
-            make_report(),
-            "## 機構情緒對照",
-            "機構情緒對照\n----------------",
-        )
-        self.assert_fails(report=report)
-
-    def test_unbalanced_fence_fails(self):
-        self.assert_fails(report=make_report() + "\n```\n")
-
-
-class CoverageAndTraceability(ValidatorCase):
-    def test_macro_raw_value_and_date_must_match_on_the_same_row(self):
-        original = raw_row("monetary.dgs10", "DGS10")
-        correct_date_wrong_value = original.replace("| 4.54 |", "| 9.99 |")
-        correct_value_wrong_date = original.replace(
-            "| 2026-07-10 |", "| 2026-07-09 |"
-        )
-        report = replace_once(
-            make_report(), original,
-            correct_date_wrong_value + "\n" + correct_value_wrong_date,
-        )
-        self.assert_fails(report=report)
-
-    def test_extra_fabricated_macro_raw_row_cannot_feed_dimension(self):
-        original = raw_row("monetary.walcl", "WALCL")
-        fabricated = original.replace("| 6800000.0 |", "| 9999999.0 |")
-        report = replace_once(make_report(), original, original + "\n" + fabricated)
-        report = replace_once(
-            report,
-            "WALCL **6800000.0**（2026-07-10",
-            "WALCL **9999999.0**（2026-07-10",
-        )
-        self.assert_fails(report=report)
-
-    def test_sofr_component_cannot_be_satisfied_by_sofr99_prefix(self):
-        sofr = raw_row("monetary.repo_stress_srf", "| SOFR |")
-        sofr99 = raw_row("monetary.repo_stress_srf", "SOFR99")
-        fake_prefix = sofr99.replace("| 4.35 |", "| 4.3 |")
-        report = replace_once(
-            make_report(), sofr + "\n" + sofr99,
-            fake_prefix + "\n" + sofr99,
-        )
-        self.assert_fails(report=report)
-
-    def test_required_input_accepts_explicit_search_fallback_value(self):
-        report, macro = ig_oas_search_fallback_fixture(
-            "BAMLC0A0CM spread=0.90", "0.90"
-        )
-        self.assert_passes(report=report, macro=macro)
-
-    def test_series_digits_alone_are_not_a_search_fallback_value(self):
-        report, macro = ig_oas_search_fallback_fixture("BAMLC0A0CM", "0")
-        self.assert_fails(report=report, macro=macro)
-
-    def test_fabricated_source_id_fails(self):
-        row = coverage_row(CONTRACT["sources"][0]["id"])
-        self.assert_fails(
-            report=replace_once(make_report(), row, row.replace(
-                CONTRACT["sources"][0]["id"], "valuation.fabricated"
-            ))
+    def test_ndx_fetch_failed_passes(self):
+        self.assert_passes(
+            report=make_report(ndx_failed=True), macro=ndx_failed_macro(),
+            current_forecast=forecast_payload(r1_drawdown_pct=None),
         )
 
-    def test_reordered_source_ids_fail(self):
-        first = coverage_row(CONTRACT["sources"][0]["id"])
-        second = coverage_row(CONTRACT["sources"][1]["id"])
-        report = replace_once(make_report(), first + "\n" + second, second + "\n" + first)
-        self.assert_fails(report=report)
-
-    def test_duplicate_source_id_fails(self):
-        first = coverage_row(CONTRACT["sources"][0]["id"])
-        second = coverage_row(CONTRACT["sources"][1]["id"])
-        self.assert_fails(report=replace_once(make_report(), second, first))
-
-    def test_unknown_status_fails(self):
-        row = coverage_row(CONTRACT["sources"][0]["id"])
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace("✓ DIRECT", "✓ INVENTED")
-        ))
-
-    def test_multiple_status_tokens_fail(self):
-        row = coverage_row(CONTRACT["sources"][0]["id"])
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace("✓ DIRECT", "✓ DIRECT / ✓ API")
-        ))
-
-    def test_required_source_cannot_be_not_disclosed(self):
-        required_id = next(s["id"] for s in CONTRACT["sources"] if s["required"])
-        row = coverage_row(required_id)
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace("✓ DIRECT", "✗ NOT DISCLOSED")
-        ))
-
-    def test_missing_search_trace_fails(self):
-        self.assert_fails(report=replace_once(make_report(), TRACE_ROW + "\n", ""))
-
-    def test_nonzero_search_trace_requires_http_url(self):
-        report = replace_once(
-            make_report(),
-            TRACE_ROW,
-            TRACE_ROW.replace(
-                "https://example.com/rename", "ftp://example.com/rename"
-            ),
-        )
-        self.assert_fails(report=report)
-
-    def test_nonzero_search_trace_rejects_bare_https_scheme(self):
-        report = replace_once(
-            make_report(),
-            TRACE_ROW,
-            TRACE_ROW.replace("https://example.com/rename", "https://"),
-        )
-        self.assert_fails(report=report)
-
-    def test_stale_event_trace_date_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(), TRACE_ROW, TRACE_ROW.replace("2026-07-12", "2026-06-01")
-        ))
-
-    def test_trace_id_must_match_coverage_search_id(self):
-        self.assert_fails(report=replace_once(
-            make_report(), TRACE_ROW, TRACE_ROW.replace(SEARCH_ID, "speculation.fake", 1)
-        ))
-
-    def test_prompt_contract_mapping_mismatch_fails(self):
-        prompt = PROMPT.read_text(encoding="utf-8")
-        needle = CONTRACT["sources"][0]["prompt_match"]
-        self.assertEqual(prompt.count(needle), 1)
-        prompt = prompt.replace(needle, "renamed source that is absent from contract", 1)
-        self.assert_fails(prompt_text=prompt)
-
-    def test_prompt_source_hidden_by_tilde_fence_with_backticks_fails(self):
-        prompt = PROMPT.read_text(encoding="utf-8")
-        needle = CONTRACT["sources"][0]["prompt_match"]
-        source_line = next(
-            line for line in prompt.splitlines()
-            if line.startswith("- ") and needle in line
-        )
-        hidden = f"~~~ audit `source hidden`\n{source_line}\n~~~"
-        self.assert_fails(prompt_text=replace_once(prompt, source_line, hidden))
-
-    def test_successful_direct_source_requires_raw_evidence(self):
-        row = raw_row("valuation.sp500_pe_cape")
-        self.assert_fails(report=replace_once(make_report(), row + "\n", ""))
-
-    def test_direct_event_evidence_obeys_contract_window(self):
-        row = raw_row("speculation.microcap_moonshots")
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace("2026-07-12", "2026-06-01")
-        ))
-
-    def test_all_macro_bindings_crosscheck_coverage(self):
-        macro = macro_payload()
-        macro["series"]["CPIAUCSL"] = {"status": "fetch_failed", "source": None}
-        self.assert_fails(macro=macro)
-
-    def test_zero_result_status_is_contract_limited(self):
-        source_id = "valuation.sp500_pe_cape"
-        row = coverage_row(source_id)
-        report = replace_once(
-            make_report(), row,
-            row.replace("✓ DIRECT", "✓ SEARCH-VERIFIED（0 件）"),
-        )
-        self.assert_fails(report=report)
-
-    def test_ten_results_is_not_zero_result(self):
-        row = coverage_row(SEARCH_ID)
-        report = replace_once(
-            make_report(), row,
-            row.replace("✓ SEARCH-VERIFIED", "✓ SEARCH-VERIFIED（10 件）"),
-        )
-        report = replace_once(
-            report, TRACE_ROW, TRACE_ROW.replace("2026-07-12", "—")
-        )
-        self.assert_fails(report=report)
-
-    def test_future_wrong_timezone_retrieval_timestamp_fails(self):
-        row = raw_row("valuation.sp500_pe_cape")
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace(TIMESTAMP, "2099-01-01T00:00:00+00:00")
-        ))
 
 
 class SpvDealMarkerTests(ValidatorCase):
@@ -1303,485 +836,985 @@ class SpvDealMarkerTests(ValidatorCase):
         self.assert_fails(report=spv_deal_marker_fixture(event_item=item))
 
 
-class HistoricalEvidenceSemantics(ValidatorCase):
-    def test_missing_qualitative_evidence_cannot_be_declared_miss(self):
-        source_id = "speculation.microcap_moonshots"
-        coverage = coverage_row(source_id)
-        raw = raw_row(source_id)
+class RoundTwoReviewFixes(ValidatorCase):
+    def test_indented_uncited_bullet_after_blank_line_fails(self):
         report = replace_once(
-            make_report(), coverage,
-            coverage.replace("✓ DIRECT", "⛔ FETCH FAILED"),
-        )
-        report = replace_once(report, raw + "\n", "")
-        # 2021.6 still says 未命中 and cites this now-unavailable source.
-        self.assert_fails(report=report)
+            make_report(), "## 支持 no 的證據\n", "## 支持 no 的證據\n\n - [R1] 沒有引用的證據。\n")
+        self.assert_fails(report=report, contains="cites no successful contract source_id")
 
-    def test_zero_result_trace_cannot_support_positive_feature_hit(self):
-        source_id = "speculation.microcap_moonshots"
-        coverage = coverage_row(source_id)
-        raw = raw_row(source_id)
-        zero_trace = (
-            f"| {source_id} | microcap zero-result screen | microcap past 7 days | "
-            f"SEC checked; 0 qualifying results | — | {TIMESTAMP} |"
-        )
-        report = replace_once(
-            make_report(), coverage,
-            coverage.replace("✓ DIRECT", "✓ SEARCH-VERIFIED（0 件）"),
-        )
-        report = replace_once(report, raw + "\n", "")
-        report = replace_once(report, TRACE_ROW, TRACE_ROW + "\n" + zero_trace)
-        report = replace_once(
-            report,
-            "- 1999.4｜未命中｜source_ids=speculation.ipo_heat｜contract feature audit",
-            "- 1999.4｜命中｜source_ids=speculation.microcap_moonshots｜contract feature audit",
-        )
-        report = replace_once(
-            report,
-            "- 1999 晚期狂熱：命中 1/10 = 10%",
-            "- 1999 晚期狂熱：命中 2/10 = 20%",
-        )
-        report = replace_once(
-            report,
-            f"| 1999 晚期狂熱 | 10% | {bar(10)} |  |",
-            f"| 1999 晚期狂熱 | 20% | {bar(20)} |  |",
-        )
-        self.assert_fails(report=report)
-
-
-class MetadataAndStrictCells(ValidatorCase):
-    def test_meta_report_date_mismatch_fails(self):
-        report = replace_once(make_report(), "報告日期：2026-07-13", "報告日期：2026-07-12")
-        self.assert_fails(report=report)
-
-    def test_meta_iso_week_mismatch_fails(self):
-        report = replace_once(make_report(), "ISO 週次：2026-W29", "ISO 週次：2026-W28")
-        self.assert_fails(report=report)
-
-    def test_meta_prior_interval_mismatch_fails(self):
-        report = replace_once(
-            make_report(),
-            "前次基準：report-2026-07-09（4天前）",
-            "前次基準：report-2026-07-09（5天前）",
-        )
-        self.assert_fails(report=report)
-
-    def test_meta_timezone_mismatch_fails(self):
-        report = replace_once(
-            make_report(),
-            "執行日：2026-07-13 Asia/Taipei",
-            "執行日：2026-07-13 UTC",
-        )
-        self.assert_fails(report=report)
-
-    def test_decorated_dimension_score_fails(self):
-        row = f"| 估值溢價 | {bar(50)} | 50 | 49 | +1 |"
-        self.assert_fails(report=replace_once(make_report(), row, row.replace("| 50 |", "| 50 points |")))
-
-    def test_decorated_delta_fails(self):
-        row = f"| 估值溢價 | {bar(50)} | 50 | 49 | +1 |"
-        self.assert_fails(report=replace_once(make_report(), row, row.replace("| +1 |", "| +1 point |")))
-
-    def test_bar_characters_must_be_ordered(self):
-        row = f"| 估值溢價 | {bar(50)} | 50 | 49 | +1 |"
-        bad = "▰▱▰▰▰▱▱▱▱▱"
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace(bar(50), bad)
-        ))
-
-    def test_bar_must_have_exactly_ten_cells(self):
-        row = f"| 估值溢價 | {bar(50)} | 50 | 49 | +1 |"
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace(bar(50), bar(50) + "▱")
-        ))
-
-
-class CrossRunState(ValidatorCase):
-    def test_same_day_prior_artifact_fails(self):
-        prior = prior_score()
-        prior.update({
-            "date": DATE,
-            "iso_week": "2026-W29",
-            "weekday": "Monday",
-        })
-        macro = macro_payload()
-        macro["prior_run_date"] = DATE
-        self.assert_fails(prior=prior, macro=macro)
-
-    def test_future_prior_artifact_fails(self):
-        prior = prior_score()
-        prior.update({
-            "date": "2026-07-14",
-            "iso_week": "2026-W29",
-            "weekday": "Tuesday",
-        })
-        macro = macro_payload()
-        macro["prior_run_date"] = "2026-07-14"
-        self.assert_fails(prior=prior, macro=macro)
-
-    def test_corrupt_prior_weighted_total_fails(self):
-        prior = prior_score()
-        prior["total"] = 41
-        self.assert_fails(prior=prior)
-
-    def test_corrupt_prior_tier_fails(self):
-        prior = prior_score()
-        prior["tier"] = "溫和"
-        self.assert_fails(prior=prior)
-
-    def test_section1_previous_score_must_match_prior(self):
-        row = f"| 估值溢價 | {bar(50)} | 50 | 49 | +1 |"
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace("| 49 |", "| 48 |")
-        ))
-
-    def test_json_regime_must_match_section3(self):
-        self.assert_fails(report=replace_once(
-            make_report(), '"regime": "穩定共存"', '"regime": "分歧"'
-        ))
-
-    def test_json_trigger_state_must_match_visible_labels(self):
-        self.assert_fails(report=replace_once(
-            make_report(), '"trigger_state": "未擊發"', '"trigger_state": "初啟"'
-        ))
-
-    def test_json_monetary_side_must_match_d5_conclusion(self):
-        self.assert_fails(report=replace_once(
-            make_report(), '"monetary_side": "中性"', '"monetary_side": "自滿側"'
-        ))
-
-    def test_hy_widening_streak_is_recomputed(self):
-        self.assert_fails(report=replace_once(
-            make_report(), '"hy_oas_widening_streak": 0', '"hy_oas_widening_streak": 1'
-        ))
-
-    def test_sp500_deviation_is_copied_from_macro(self):
-        self.assert_fails(report=replace_once(
-            make_report(), '"sp500_dev200_pct": 12.0', '"sp500_dev200_pct": 13.0'
-        ))
-
-    def test_trigger_side_invariant_fails(self):
-        report = replace_once(
-            make_report(),
-            "**結論**：中性；信用環境位於測試區間。",
-            "**結論**：扳機側；信用環境位於測試區間。",
-        )
-        report = replace_once(
-            report, '"monetary_side": "中性"', '"monetary_side": "扳機側"'
-        )
-        self.assert_fails(report=report)
-
-    def test_trigger_state_cannot_be_arbitrarily_upgraded(self):
+    def test_uniformly_indented_valid_bullets_pass(self):
         report = make_report()
-        report = replace_once(
-            report, "扳機狀態：未擊發；最貼近錨點", "扳機狀態：已擊發；最貼近錨點"
-        )
-        report = replace_once(
-            report,
-            "**結論**：扳機狀態：未擊發——目前未見決定性觸發。",
-            "⚠ **結論**：扳機狀態：已擊發——測試升級。",
-        )
-        report = replace_once(
-            report, '"trigger_state": "未擊發"', '"trigger_state": "已擊發"'
-        )
-        current = score_payload()
-        current["trigger_state"] = "已擊發"
-        self.assert_fails(report=report, current_score=current)
+        for heading in ("## 支持 yes 的證據", "## 支持 no 的證據"):
+            start = report.index(heading)
+            end = report.index("\n## ", start + 1)
+            section = report[start:end].replace("\n- ", "\n - ")
+            report = report[:start] + section + report[end:]
+        self.assert_passes(report=report)
 
-    def test_active_machine_trigger_reason_is_mandatory(self):
+    def test_stray_prose_in_evidence_section_fails(self):
+        report = replace_once(
+            make_report(), "## 支持 yes 的證據\n", "## 支持 yes 的證據\n\n本次無可用資料\n")
+        self.assert_fails(report=report, contains="stray text")
+
+    def test_false_drawdown_claim_in_appendix_fails(self):
+        report = replace_once(
+            make_report(), "### Raw data\n", "距 52 週高點回撤 99.99%\n\n### Raw data\n")
+        self.assert_fails(report=report, contains="drawdown claim")
+
+    def test_ordered_item_after_cited_bullet_fails(self):
+        line = f"- [R1] 距 52 週高點回撤僅 {NDX_DRAWDOWN:.2f}%。`{NDX_ID}`"
+        report = replace_once(make_report(), line, line + "\n1. [R1] 沒有引用的證據。")
+        self.assert_fails(report=report, contains="stray text")
+
+    def test_blockquote_in_evidence_section_fails(self):
+        report = replace_once(
+            make_report(), "## 支持 no 的證據\n", "## 支持 no 的證據\n\n> 沒有引用的引言。\n")
+        self.assert_fails(report=report, contains="stray text")
+
+    def test_negative_drawdown_claim_fails(self):
+        report = replace_once(
+            make_report(), "### Raw data\n",
+            f"距 52 週高點回撤 -{NDX_DRAWDOWN:.2f}%\n\n### Raw data\n")
+        self.assert_fails(report=report, contains="drawdown claim")
+
+    def test_english_score_or_probability_prose_fails(self):
+        report = replace_once(
+            make_report(), "**結論：no**\n",
+            "**結論：no**\n\nAI bubble Burst Probability: 80%; Tier: high.\n")
+        self.assert_fails(report=report, contains="scoring/probability term")
+
+    def test_score_or_probability_prose_fails(self):
+        report = replace_once(
+            make_report(), "**結論：no**\n", "**結論：no**\n\n泡沫評分 99/100，破裂機率 75%。\n")
+        self.assert_fails(report=report, contains="scoring/probability term")
+
+
+class HeadingsTitleMeta(ValidatorCase):
+    """Check 1: exact H2 headings, title, meta line."""
+
+    def test_missing_h2_fails(self):
+        report = replace_once(make_report(), "## 與前期比較\n", "")
+        self.assert_fails(report=report, contains="H2 headings/order mismatch")
+
+    def test_reordered_h2_fails(self):
+        report = make_report()
+        report = report.replace("## 支持 yes 的證據", "@@A").replace(
+            "## 支持 no 的證據", "## 支持 yes 的證據").replace(
+            "@@A", "## 支持 no 的證據")
+        self.assert_fails(report=report, contains="H2 headings/order mismatch")
+
+    def test_extra_h2_fails(self):
+        report = replace_once(
+            make_report(), "## 數據附錄", "## 本次總分\n\n無。\n\n## 數據附錄")
+        self.assert_fails(report=report, contains="H2 headings/order mismatch")
+
+    def test_removed_scoring_sections_are_not_demanded(self):
+        report = make_report()
+        for old_heading in ("## 六維度評分", "## 綜合分數", "## 本次分數存檔"):
+            self.assertNotIn(old_heading, report)
+        self.assert_passes()
+
+    def test_wrong_title_fails(self):
+        report = replace_once(
+            make_report(), f"# {DATE} AI 泡沫破裂預測報告",
+            f"# {DATE} 市場泡沫風險評估報告")
+        self.assert_fails(report=report, contains="report title must be")
+
+    def test_title_date_must_match_forecast_date(self):
+        report = replace_once(
+            make_report(), f"# {DATE} AI", "# 2026-07-14 AI")
+        self.assert_fails(report=report)
+
+    def test_missing_meta_line_fails(self):
+        meta = next(line for line in make_report().splitlines()
+                    if line.startswith("報告日期："))
+        self.assert_fails(
+            report=replace_once(make_report(), meta + "\n", ""),
+            contains="title area must contain exactly")
+
+    def test_meta_window_must_end_at_horizon(self):
+        report = replace_once(
+            make_report(), f"{DATE} → {HORIZON_END}", f"{DATE} → 2027-01-12")
+        self.assert_fails(report=report, contains="預測窗口 must be")
+
+    def test_meta_prior_reference_must_match_prior_date(self):
+        report = replace_once(
+            make_report(), f"report-{PRIOR_DATE}（4天前）",
+            f"report-{PRIOR_DATE}（5天前）")
+        self.assert_fails(report=report, contains="meta prior reference")
+
+    def test_meta_iso_week_must_match_date(self):
+        report = replace_once(make_report(), "ISO 週次：2026-W29", "ISO 週次：2026-W30")
+        self.assert_fails(report=report, contains="meta ISO week")
+
+
+class ConclusionSection(ValidatorCase):
+    """Check 2: the conclusion line."""
+
+    def test_conclusion_must_agree_with_forecast_answer(self):
+        report = replace_once(make_report(), "**結論：no**", "**結論：yes**")
+        self.assert_fails(report=report, contains="does not match forecast answer")
+
+    def test_hedged_first_line_fails(self):
+        report = replace_once(make_report(), "**結論：no**", "**結論：偏 no**")
+        self.assert_fails(report=report, contains="first conclusion line")
+
+    def test_text_before_conclusion_line_fails(self):
+        report = replace_once(
+            make_report(), "## 結論\n**結論：no**", "## 結論\n前言。\n**結論：no**")
+        self.assert_fails(report=report, contains="first conclusion line")
+
+    def test_second_conclusion_line_fails(self):
+        report = replace_once(
+            make_report(), "三條路徑皆未接近", "**結論：yes**\n\n三條路徑皆未接近")
+        self.assert_fails(report=report, contains="repeats a conclusion line")
+
+
+class ResolutionSection(ValidatorCase):
+    """Check 3: verbatim resolution block and version line."""
+
+    def test_paraphrased_block_fails(self):
+        report = replace_once(
+            make_report(), "≥ 25%", "≥ 20%")
+        self.assert_fails(report=report, contains="verbatim")
+
+    def test_block_missing_fails(self):
+        report = replace_once(make_report(), RESOLUTION_BLOCK, "見前次報告。")
+        self.assert_fails(report=report, contains="verbatim")
+
+    def test_version_line_missing_fails(self):
+        report = replace_once(
+            make_report(), f"解析版本：v{CONTRACT['resolution']['version']}\n", "")
+        self.assert_fails(report=report, contains="解析版本")
+
+    def test_wrong_version_line_fails(self):
+        report = replace_once(
+            make_report(), f"解析版本：v{CONTRACT['resolution']['version']}",
+            "解析版本：v9")
+        self.assert_fails(report=report, contains="解析版本")
+
+    def test_version_line_must_follow_block(self):
+        version_line = f"解析版本：v{CONTRACT['resolution']['version']}"
+        report = replace_once(
+            make_report(), RESOLUTION_BLOCK + "\n\n" + version_line,
+            RESOLUTION_BLOCK + "\n\n補充說明。\n\n" + version_line)
+        self.assert_fails(report=report, contains="解析版本")
+
+
+    def test_annotation_after_version_line_fails(self):
+        version_line = f"解析版本：v{CONTRACT['resolution']['version']}"
+        report = replace_once(
+            make_report(), version_line,
+            version_line + "\n\n補充：R1 門檻改採回撤 10%。")
+        self.assert_fails(report=report, contains="must contain only the contract block")
+
+    def test_text_before_block_fails(self):
+        report = replace_once(
+            make_report(), RESOLUTION_BLOCK, "本次解析條件如下。\n\n" + RESOLUTION_BLOCK)
+        self.assert_fails(report=report, contains="must contain only the contract block")
+
+
+class PathSections(ValidatorCase):
+    """Check 4: three path H3s, 判讀 lines, R1 drawdown text."""
+
+    def test_stray_h3_outside_paths_and_appendix_fails(self):
+        report = replace_once(
+            make_report(), "## 支持 yes 的證據\n", "## 支持 yes 的證據\n\n### 不合約標題\n")
+        self.assert_fails(report=report, contains="H3 headings outside")
+
+    def test_false_drawdown_claim_in_evidence_fails(self):
+        report = replace_once(
+            make_report(), f"距 52 週高點回撤僅 {NDX_DRAWDOWN:.2f}%", "距 52 週高點回撤僅 95.00%")
+        self.assert_fails(report=report, contains="drawdown claim")
+
+    def test_unrounded_matching_drawdown_claim_passes(self):
+        report = replace_once(
+            make_report(), f"距 52 週高點回撤僅 {NDX_DRAWDOWN:.2f}%",
+            f"距 52 週高點回撤僅 {NDX_DRAWDOWN:g}%")
+        self.assert_passes(report=report)
+
+    def test_drawdown_claim_when_block_failed_fails(self):
+        report = make_report(ndx_failed=True).replace(
+            "## 支持 no 的證據\n", "## 支持 no 的證據\n\n- [R1] 距 52 週高點回撤 12.00%。`valuation.sp500_trend`\n", 1)
+        self.assert_fails(
+            report=report, macro=ndx_failed_macro(),
+            current_forecast=forecast_payload(r1_drawdown_pct=None),
+            contains="although ndx_drawdown failed")
+
+    def test_missing_path_h3_fails(self):
+        report = replace_once(make_report(), "### R2 資本支出收縮\n", "")
+        self.assert_fails(report=report, contains="path H3 headings/order mismatch")
+
+    def test_reordered_path_h3_fails(self):
+        report = make_report()
+        report = report.replace("### R2 資本支出收縮", "@@").replace(
+            "### R3 AI 信用事件", "### R2 資本支出收縮").replace(
+            "@@", "### R3 AI 信用事件")
+        self.assert_fails(report=report, contains="path H3 headings/order mismatch")
+
+    def test_missing_judgement_line_fails(self):
+        report = replace_once(
+            make_report(), "**判讀：** 尚無任何一家下修，距離至少兩家下修的條件很遠。",
+            "尚無任何一家下修。")
+        self.assert_fails(report=report, contains="lacks a `**判讀：**` line")
+
+    def test_r1_drawdown_text_must_match_artifact(self):
+        report = replace_once(make_report(), "回撤 5.00%", "回撤 4.00%")
+        self.assert_fails(report=report, contains="距 52 週高點回撤 5.00%")
+
+    def test_r1_drawdown_needs_two_decimals(self):
+        report = replace_once(make_report(), "回撤 5.00%", "回撤 5%")
+        self.assert_fails(report=report, contains="距 52 週高點回撤 5.00%")
+
+    def test_r1_failed_block_requires_unavailable_text(self):
+        report = replace_once(
+            make_report(ndx_failed=True), R1_UNAVAILABLE_TEXT, "NASDAQ-100 回撤約五成。")
+        self.assert_fails(
+            report=report, macro=ndx_failed_macro(),
+            current_forecast=forecast_payload(r1_drawdown_pct=None),
+            contains="R1 回撤不可用")
+
+
+class EvidenceSections(ValidatorCase):
+    """Check 5: tagged, source-cited bullets citing only successful sources."""
+
+    def test_bullet_without_path_tag_fails(self):
+        report = replace_once(
+            make_report(), "- [R3] AI 信用定價出現分歧", "- AI 信用定價出現分歧")
+        self.assert_fails(report=report, contains="must start with a path tag")
+
+    def test_bullet_without_citation_fails(self):
+        report = replace_once(
+            make_report(),
+            "- [R3] AI 信用定價出現分歧，部分借款人利差擴大。`valuation.ai_credit_schism`",
+            "- [R3] AI 信用定價出現分歧，部分借款人利差擴大。")
+        self.assert_fails(report=report, contains="cites no successful contract source_id")
+
+    def test_bullet_citing_only_unsuccessful_source_fails(self):
+        report = replace_once(
+            make_report(), "利差擴大。`valuation.ai_credit_schism`",
+            "利差擴大。`structural.ai_infrastructure_debt`")
+        self.assert_fails(report=report, contains="cites no successful contract source_id")
+
+    def test_empty_evidence_section_fails(self):
+        report = replace_once(
+            make_report(),
+            "- [R3] AI 信用定價出現分歧，部分借款人利差擴大。`valuation.ai_credit_schism`\n",
+            "")
+        self.assert_fails(report=report, contains="needs at least 1 top-level bullet")
+
+    def test_body_citation_of_unsuccessful_source_fails(self):
+        report = replace_once(
+            make_report(), "三條路徑皆未接近解析條件，",
+            "三條路徑皆未接近解析條件（`structural.ai_infrastructure_debt`），")
+        self.assert_fails(report=report, contains="whose Coverage status is not successful")
+
+    def test_failed_ndx_source_cannot_be_cited_in_path_text(self):
+        report = replace_once(
+            make_report(ndx_failed=True), R1_UNAVAILABLE_TEXT,
+            R1_UNAVAILABLE_TEXT + f"`{NDX_ID}`")
+        self.assert_fails(
+            report=report, macro=ndx_failed_macro(),
+            current_forecast=forecast_payload(r1_drawdown_pct=None),
+            contains=f"body cites {NDX_ID}")
+
+    def test_unsuccessful_source_may_be_named_in_gaps_section(self):
+        report = replace_once(
+            make_report(), "- 下一次財報日期尚未公布",
+            "- `structural.ai_infrastructure_debt` 本次未揭露。\n- 下一次財報日期尚未公布")
+        self.assert_passes(report=report)
+
+
+class ForecastObject(ValidatorCase):
+    """Check 6: forecast JSON fence vs standalone file vs report."""
+
+    def test_fence_must_equal_standalone_file(self):
+        self.assert_fails(
+            current_forecast=forecast_payload(r1_drawdown_pct=5.5),
+            contains="does not equal the report JSON fence")
+
+    def test_type_conflation_between_bool_and_number_fails(self):
+        current = forecast_payload(question_version=True)
+        report = make_report(forecast=current)
+        self.assert_fails(report=report, current_forecast=current,
+                          contains="question_version")
+
+    def _both(self, **overrides):
+        current = forecast_payload(**overrides)
+        return dict(report=make_report(forecast=current), current_forecast=current)
+
+    def test_extra_key_fails(self):
+        current = {**forecast_payload(), "total": 42}
+        self.assert_fails(
+            report=make_report(forecast=current), current_forecast=current,
+            contains="fields mismatch")
+
+    def test_missing_key_fails(self):
+        current = forecast_payload()
+        del current["flip_evidence"]
+        self.assert_fails(
+            report=make_report(forecast=current), current_forecast=current,
+            contains="fields mismatch")
+
+    def test_date_must_equal_report_date(self):
+        self.assert_fails(**self._both(date="2026-07-14"), contains="date does not match")
+
+    def test_iso_week_must_match(self):
+        self.assert_fails(**self._both(iso_week="2026-W30"), contains="iso_week")
+
+    def test_weekday_must_match(self):
+        self.assert_fails(**self._both(weekday="Tuesday"), contains="weekday")
+
+    def test_timezone_must_match(self):
+        self.assert_fails(**self._both(timezone="UTC"), contains="timezone")
+
+    def test_question_version_must_match_contract(self):
+        self.assert_fails(**self._both(question_version=2), contains="question_version")
+
+    def test_resolution_version_must_match_contract(self):
+        self.assert_fails(**self._both(resolution_version=2), contains="resolution_version")
+
+    def test_answer_must_be_yes_or_no(self):
+        self.assert_fails(**self._both(answer="maybe"), contains="answer must be one of")
+
+    def test_horizon_end_must_be_date_plus_horizon(self):
+        self.assert_fails(**self._both(horizon_end="2027-01-12"), contains="horizon_end")
+
+    def test_r1_drawdown_must_equal_macro(self):
+        self.assert_fails(**self._both(r1_drawdown_pct=6.0), contains="r1_drawdown_pct")
+
+    def test_r1_drawdown_null_fails_when_block_ok(self):
+        self.assert_fails(**self._both(r1_drawdown_pct=None), contains="r1_drawdown_pct")
+
+    def test_r1_drawdown_must_be_null_when_block_failed(self):
+        current = forecast_payload()
+        self.assert_fails(
+            report=make_report(ndx_failed=True, forecast=current),
+            macro=ndx_failed_macro(), current_forecast=current,
+            contains="must be null when ndx_drawdown failed")
+
+    def test_resolution_must_be_null(self):
+        self.assert_fails(**self._both(resolution="yes"), contains="resolution must be null")
+
+    def test_forecast_json_in_wrong_section_fails(self):
+        report = make_report()
+        fence_start = report.index("```json")
+        fence_end = report.index("```\n", fence_start + 7) + 4
+        fence = report[fence_start:fence_end]
+        report = report[:fence_start] + "存檔見附錄。\n" + report[fence_end:]
+        report = replace_once(report, "## 數據附錄\n", "## 數據附錄\n\n" + fence + "\n")
+        self.assert_fails(report=report, contains="outside")
+
+    def test_duplicate_json_key_fails(self):
+        report = replace_once(
+            make_report(), '"date": "2026-07-13",',
+            '"date": "2026-07-13",\n  "date": "2026-07-13",')
+        self.assert_fails(report=report, contains="duplicate JSON key")
+
+
+class PriorAndFlip(ValidatorCase):
+    """Check 7: prior forecast, flip discipline, legacy and baseline lines."""
+
+    def test_macro_prior_run_date_must_match_prior_forecast(self):
         macro = macro_payload()
-        macro["series"]["BAMLH0A0HYM2"]["delta_bps"] = 50.0
+        macro["prior_run_date"] = "2026-07-11"
+        self.assert_fails(macro=macro, contains="macro prior_run_date")
+
+    def test_prior_forecast_missing_fields_fails(self):
+        prior = prior_forecast_payload()
+        del prior["horizon_end"]
+        self.assert_fails(prior_forecast=prior, contains="prior forecast lacks fields")
+
+    def test_prior_date_must_match_prior_forecast_date(self):
+        current = forecast_payload(prior_date="2026-07-11")
+        macro = macro_payload()
+        macro["prior_run_date"] = "2026-07-11"
+        self.assert_fails(
+            report=make_report(forecast=current), current_forecast=current,
+            macro=macro, contains="prior_date does not match prior forecast date")
+
+    def test_prior_answer_must_match_prior_forecast_answer(self):
+        current = forecast_payload(prior_answer="yes")
+        self.assert_fails(
+            report=make_report(forecast=current), current_forecast=current,
+            contains="prior_answer does not match")
+
+    def test_first_line_must_state_prior_conclusion(self):
+        report = replace_once(
+            make_report(), f"前次結論：no（report-{PRIOR_DATE}）",
+            f"前次結論：yes（report-{PRIOR_DATE}）")
+        self.assert_fails(report=report, contains="first line must be")
+
+    def test_unchanged_answer_requires_maintain_line(self):
+        report = replace_once(make_report(), "本次結論：維持", "本次結論：翻轉")
+        self.assert_fails(report=report, contains="本次結論：維持")
+
+    def test_unchanged_answer_requires_empty_flip_evidence(self):
+        current = forecast_payload(flip_evidence=["ai.hyperscaler_capex"])
+        self.assert_fails(
+            report=make_report(forecast=current), current_forecast=current,
+            contains="flip_evidence must be [] when the answer is unchanged")
+
+    def test_flip_requires_flip_line(self):
+        report = replace_once(
+            make_report(answer="yes"), "本次結論：翻轉", "本次結論：維持")
+        self.assert_fails(report=report, answer="yes", contains="本次結論：翻轉")
+
+    def test_flip_requires_nonempty_flip_evidence(self):
+        current = forecast_payload(answer="yes", flip_evidence=[])
+        self.assert_fails(
+            report=make_report(answer="yes", forecast=current),
+            answer="yes", current_forecast=current,
+            contains="flip_evidence must be non-empty")
+
+    def test_flip_evidence_must_be_deduplicated(self):
+        ids = ["ai.hyperscaler_capex", "ai.hyperscaler_capex"]
+        current = forecast_payload(answer="yes", flip_evidence=ids)
+        self.assert_fails(
+            report=make_report(answer="yes", forecast=current),
+            answer="yes", current_forecast=current, contains="duplicates")
+
+    def test_flip_evidence_must_be_contract_source(self):
+        current = forecast_payload(answer="yes", flip_evidence=["made.up_source"])
+        self.assert_fails(
+            report=make_report(answer="yes", forecast=current),
+            answer="yes", current_forecast=current, contains="not a contract source_id")
+
+    def test_flip_evidence_must_be_successful_source(self):
+        current = forecast_payload(
+            answer="yes", flip_evidence=["structural.ai_infrastructure_debt"])
+        report = replace_once(
+            make_report(answer="yes", forecast=current),
+            "見 `ai.hyperscaler_capex`，", "見 `structural.ai_infrastructure_debt`，")
+        self.assert_fails(
+            report=report, answer="yes", current_forecast=current,
+            contains="lacks a successful Coverage status")
+
+    def test_flip_evidence_must_postdate_prior_forecast(self):
+        row = raw_row("ai.hyperscaler_capex")
+        report = replace_once(
+            make_report(answer="yes"), row,
+            row.replace("| 2026-07-10 |", f"| {PRIOR_DATE} |"))
+        self.assert_fails(report=report, answer="yes", contains="dated after")
+
+    def test_flip_evidence_must_be_cited_in_comparison(self):
+        report = replace_once(
+            make_report(answer="yes"), "見 `ai.hyperscaler_capex`，", "見資本支出來源，")
+        self.assert_fails(report=report, answer="yes", contains="is not cited in")
+
+    def test_legacy_prior_requires_legacy_line(self):
+        report = replace_once(
+            make_report(mode="legacy"),
+            f"前次結論：無前次預測（report-{PRIOR_DATE} 為舊格式評分報告）",
+            "前次結論：無前次（基準）")
+        self.assert_fails(report=report, mode="legacy", contains="first line must be")
+
+    def test_legacy_prior_must_not_carry_prior_answer(self):
+        current = forecast_payload("legacy", prior_answer="no")
+        self.assert_fails(
+            report=make_report("legacy", forecast=current), mode="legacy",
+            current_forecast=current, contains="prior_answer must be null")
+
+    def test_legacy_prior_must_not_carry_flip_evidence(self):
+        current = forecast_payload("legacy", flip_evidence=["ai.hyperscaler_capex"])
+        self.assert_fails(
+            report=make_report("legacy", forecast=current), mode="legacy",
+            current_forecast=current, contains="flip_evidence must be []")
+
+    def test_legacy_prior_date_must_match_macro(self):
+        macro = macro_payload()
+        macro["prior_run_date"] = "2026-07-11"
+        self.assert_fails(mode="legacy", macro=macro, contains="macro prior_run_date")
+
+    def test_baseline_requires_baseline_line(self):
+        report = replace_once(
+            make_report(mode="baseline"), "前次結論：無前次（基準）",
+            f"前次結論：無前次預測（report-{PRIOR_DATE} 為舊格式評分報告）")
+        self.assert_fails(report=report, mode="baseline", contains="first line must be")
+
+    def test_baseline_requires_macro_none(self):
+        self.assert_fails(
+            baseline=True, macro=macro_payload(), contains="prior_run_date")
+
+
+class GapsSection(ValidatorCase):
+    """Check 8: FETCH FAILED sources are listed."""
+
+    def failed_kwargs(self, report):
+        return dict(
+            report=report, macro=ndx_failed_macro(),
+            current_forecast=forecast_payload(r1_drawdown_pct=None))
+
+    def test_failed_source_must_be_mentioned(self):
+        report = replace_once(
+            make_report(ndx_failed=True), f"- `{NDX_ID}` 為 FETCH FAILED，", "- 某來源缺漏，")
+        self.assert_fails(**self.failed_kwargs(report), contains="must mention FETCH FAILED")
+
+    def test_none_line_required_when_nothing_failed(self):
+        report = replace_once(make_report(), "本次無 FETCH FAILED 來源\n", "資料齊備。\n")
+        self.assert_fails(report=report, contains="本次無 FETCH FAILED 來源")
+
+    def test_none_line_contradicts_a_failed_source(self):
+        report = replace_once(
+            make_report(ndx_failed=True), "- 下一次財報日期",
+            "本次無 FETCH FAILED 來源\n- 下一次財報日期")
+        self.assert_fails(**self.failed_kwargs(report), contains="claims no FETCH FAILED")
+
+
+class NdxDrawdownMacro(ValidatorCase):
+    """The ndx_drawdown block is reproduced from its 252 observations."""
+
+    def mutated(self, mutate):
+        macro = macro_payload()
+        mutate(macro["ndx_drawdown"])
+        return macro
+
+    def test_missing_block_fails(self):
+        macro = macro_payload()
+        del macro["ndx_drawdown"]
+        self.assert_fails(macro=macro, contains="macro top-level fields mismatch")
+
+    def test_window_must_hold_exactly_252_observations(self):
+        macro = self.mutated(lambda b: b["window_observations"].pop())
+        self.assert_fails(macro=macro, contains="window_observations must hold exactly")
+
+    def test_window_dates_must_be_unique_newest_first(self):
+        def mutate(block):
+            window = block["window_observations"]
+            window[5], window[6] = window[6], window[5]
+        self.assert_fails(
+            macro=self.mutated(mutate), contains="not unique newest-first")
+
+    def test_duplicate_window_dates_fail(self):
+        def mutate(block):
+            block["window_observations"][3]["date"] = block["window_observations"][2]["date"]
+        self.assert_fails(
+            macro=self.mutated(mutate), contains="not unique newest-first")
+
+    def test_latest_must_equal_first_observation(self):
+        macro = self.mutated(lambda b: b.update(latest=19900.0))
+        self.assert_fails(macro=macro, contains="window_observations[0]")
+
+    def test_high_must_be_window_maximum(self):
+        macro = self.mutated(lambda b: b.update(high=20900.0))
+        self.assert_fails(macro=macro, contains="max of window_observations")
+
+    def test_high_date_must_belong_to_high_observation(self):
+        macro = self.mutated(
+            lambda b: b.update(high_date=b["window_observations"][50]["date"]))
+        self.assert_fails(macro=macro, contains="high_date/high is absent")
+
+    def test_drawdown_arithmetic_is_recomputed(self):
+        macro = self.mutated(lambda b: b.update(drawdown_pct=4.9))
+        self.assert_fails(macro=macro, contains="drawdown_pct arithmetic")
+
+    def test_threshold_level_is_recomputed(self):
+        macro = self.mutated(lambda b: b.update(r1_threshold_level=15000.0))
+        self.assert_fails(macro=macro, contains="r1_threshold_level arithmetic")
+
+    def test_threshold_pct_must_match_contract(self):
+        macro = self.mutated(lambda b: b.update(r1_threshold_pct=20))
+        self.assert_fails(macro=macro, contains="r1_threshold_pct")
+
+    def test_r1_met_must_match_drawdown(self):
+        macro = self.mutated(lambda b: b.update(r1_met=True))
+        self.assert_fails(macro=macro, contains="r1_met")
+
+    def test_fetch_failed_must_not_retain_success_fields(self):
+        macro = ndx_failed_macro()
+        macro["ndx_drawdown"]["latest"] = 19950.0
+        self.assert_fails(
+            report=make_report(ndx_failed=True), macro=macro,
+            current_forecast=forecast_payload(r1_drawdown_pct=None),
+            contains="fetch_failed retains success fields")
+
+    def test_invalid_status_fails(self):
+        macro = self.mutated(lambda b: b.update(status="stale"))
+        self.assert_fails(macro=macro, contains="invalid status")
+
+    def test_raw_rows_must_reproduce_artifact_values(self):
+        report = replace_once(
+            make_report(), f"| {NDX_HIGH:.2f} |", "| 20999.00 |")
+        self.assert_fails(report=report, contains="ndx_drawdown high")
+
+    def test_raw_rows_must_include_drawdown_pct(self):
+        report = replace_once(
+            make_report(), ndx_raw_rows()[2] + "\n", "")
+        self.assert_fails(report=report, contains="ndx_drawdown drawdown_pct")
+
+    def test_coverage_cannot_claim_success_for_failed_block(self):
+        report = make_report(ndx_failed=True).replace(
+            coverage_row(NDX_ID).replace("✓ API", "⛔ FETCH FAILED"),
+            coverage_row(NDX_ID))
+        self.assert_fails(
+            report=report, macro=ndx_failed_macro(),
+            current_forecast=forecast_payload(r1_drawdown_pct=None),
+            contains="cannot claim script/direct success")
+
+
+class CliAndGlobal(ValidatorCase):
+    def test_missing_all_cli_args_fails_cleanly(self):
+        proc = subprocess.run(
+            [sys.executable, str(VALIDATOR)], capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertNotIn("Traceback", proc.stdout + proc.stderr)
+
+    def test_prior_mode_flag_is_required(self):
+        proc = self.run_validator(prior_flag=False)
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("one of the arguments", proc.stderr)
+
+    def test_prior_flags_are_mutually_exclusive(self):
+        proc = self.run_validator(extra_args=("--no-prior-forecast",))
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("not allowed with", proc.stderr)
+
+    def test_run_mode_flags_are_mutually_exclusive(self):
+        proc = self.run_validator(extra_args=("--dry-run",))
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("not allowed with", proc.stderr)
+
+    def test_run_mode_flag_is_required(self):
+        proc = self.run_validator(include_required_args=False)
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_old_score_flags_are_rejected(self):
+        proc = self.run_validator(extra_args=("--current-score", "x.json"))
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+
+    def test_macro_requires_marker_envelope(self):
+        self.assert_fails(macro_markers=False, contains="marker-delimited envelope")
+
+    def test_dry_run_requires_banner(self):
+        self.assert_fails(report=make_report(), dry_run=True, contains="DRY RUN banner")
+
+    def test_production_rejects_dry_run_banner(self):
+        self.assert_fails(
+            report=DRY_BANNER + "\n\n" + make_report(), contains="must not contain")
+
+    def test_ascii_tilde_fails(self):
+        report = replace_once(make_report(), "約兩成", "~兩成")
+        self.assert_fails(report=report, contains="ASCII `~`")
+
+    def test_api_key_query_secret_fails(self):
+        report = make_report().replace(
+            "FRED NASDAQ100 (ndx_drawdown)",
+            "https://api.stlouisfed.org/fred?series_id=NASDAQ100&api_key=super-secret", 1)
+        self.assert_fails(report=report, contains="credential-like")
+
+    def test_final_line_must_be_exact_disclaimer(self):
+        report = make_report().replace(CONTRACT["disclaimer"], "本報告僅供參考。")
+        self.assert_fails(report=report, contains="disclaimer")
+
+    def test_synonym_in_comparison_section_fails(self):
+        report = replace_once(
+            make_report(), "- 自前次預測以來", "- 本期自前次預測以來")
+        self.assert_fails(report=report, contains="terminology-locked")
+
+    def test_synonym_in_ordinary_unlocked_prose_passes(self):
+        report = replace_once(
+            make_report(), "目前未見符合規模", "本期目前未見符合規模")
+        self.assert_passes(report=report)
+
+    def test_unexpected_table_fails(self):
+        report = replace_once(
+            make_report(), "## 資料缺漏與不確定性\n",
+            "## 資料缺漏與不確定性\n\n| a | b |\n|---|---|\n| 1 | 2 |\n")
+        self.assert_fails(report=report, contains="uncontracted Markdown table")
+
+    def test_html_comment_fails(self):
+        report = replace_once(
+            make_report(), "- 下一次財報", "<!-- hidden -->\n- 下一次財報")
+        self.assert_fails(report=report, contains="HTML comments")
+
+
+
+class FetcherValidatorIntegration(ValidatorCase):
+    def test_fetcher_main_exact_stdout_envelope_passes_validator(self):
+        spec = importlib.util.spec_from_file_location(
+            "fetch_macro_validator_integration", REPO / "scripts" / "fetch_macro.py"
+        )
+        fetch_macro = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fetch_macro)
+        expected = macro_payload()
+        output = io.StringIO()
+
+        def mocked_series(series_id, _unit):
+            return copy.deepcopy(expected["series"][series_id])
+
+        fixed_now = fetch_macro.datetime.fromisoformat(TIMESTAMP)
+        with (
+            mock.patch.object(fetch_macro, "PRIOR", PRIOR_DATE),
+            mock.patch.object(fetch_macro, "FRED_KEY", "test-key-present"),
+            mock.patch.object(fetch_macro, "EIA_KEY", ""),
+            mock.patch.object(fetch_macro, "execution_now", return_value=fixed_now),
+            mock.patch.object(fetch_macro, "series_block", side_effect=mocked_series),
+            mock.patch.object(
+                fetch_macro, "sp500_trend",
+                return_value=copy.deepcopy(expected["sp500_trend"]),
+            ),
+            mock.patch.object(
+                fetch_macro, "ndx_drawdown",
+                return_value=copy.deepcopy(expected["ndx_drawdown"]),
+            ),
+            mock.patch.object(
+                fetch_macro, "cftc_lev_funds",
+                return_value=copy.deepcopy(expected["cftc_lev_funds"]),
+            ),
+            mock.patch.object(
+                fetch_macro, "move_index",
+                return_value=copy.deepcopy(expected["move_index"]),
+            ),
+            mock.patch.object(
+                fetch_macro, "ofr_repo",
+                return_value=copy.deepcopy(expected["ofr_repo"]),
+            ),
+            mock.patch.object(
+                fetch_macro, "repo_stress_block",
+                return_value=copy.deepcopy(expected["repo_stress"]),
+            ),
+            mock.patch.object(
+                fetch_macro, "decomposition_block",
+                return_value=copy.deepcopy(expected["decomposition"]),
+            ),
+            contextlib.redirect_stdout(output),
+        ):
+            fetch_macro.main()
+
+        macro_text = output.getvalue()
+        self.assertTrue(macro_text.startswith("===MACRO_JSON_START===\n"))
+        self.assertTrue(macro_text.endswith("\n===MACRO_JSON_END===\n"))
+        self.assert_passes(macro_text=macro_text)
+
+
+class MarkdownSectionAwareness(ValidatorCase):
+    def test_tilde_fence_content_is_excluded_from_ascii_tilde_scan(self):
+        validator = load_validator_module()
+        failures = validator.Failures()
+        doc = validator.MarkdownDocument(
+            "~~~text\ninside ~ is code\n~~~\n\n" + CONTRACT["disclaimer"],
+            failures,
+        )
+        validator.validate_global_security(doc, CONTRACT, failures)
+        self.assertEqual(failures.items, [])
+
+    def test_raw_table_in_wrong_section_fails(self):
+        report = replace_once(make_report(), RAW_BLOCK, "Raw data moved below.")
+        report = replace_once(
+            report, "## 資料缺漏與不確定性\n", f"## 資料缺漏與不確定性\n\n{RAW_BLOCK}\n")
+        self.assert_fails(report=report)
+
+    def test_fenced_raw_table_does_not_count(self):
+        report = replace_once(make_report(), RAW_BLOCK, f"```text\n{RAW_BLOCK}\n```")
+        self.assert_fails(report=report)
+
+    def test_fenced_heading_does_not_count(self):
+        report = replace_once(
+            make_report(),
+            "## 與前期比較",
+            "```text\n## 與前期比較\n```",
+        )
+        self.assert_fails(report=report)
+
+    def test_indented_code_table_does_not_count(self):
+        indented = "\n".join("    " + line for line in RAW_BLOCK.splitlines())
+        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, indented))
+
+    def test_raw_html_wrapped_table_fails(self):
+        wrapped = f"<script type=\"text/plain\">\n{RAW_BLOCK}\n</script>"
+        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, wrapped))
+
+    def test_incomplete_script_start_cannot_hide_table(self):
+        wrapped = f"<script\n{RAW_BLOCK}\n</script>"
+        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, wrapped))
+
+    def test_cdata_wrapped_table_fails(self):
+        wrapped = f"<![CDATA[\n{RAW_BLOCK}\n]]>"
+        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, wrapped))
+
+    def test_multiline_inline_code_cannot_hide_table(self):
+        wrapped = f"`\n{RAW_BLOCK}\n`"
+        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, wrapped))
+
+    def test_four_space_closing_fence_fails(self):
+        report = replace_once(
+            make_report(),
+            "\n```\n\n" + CONTRACT["disclaimer"],
+            "\n    ```\n\n" + CONTRACT["disclaimer"],
+        )
+        self.assert_fails(report=report)
+
+    def test_comment_hidden_checklist_does_not_count(self):
+        report = replace_once(
+            make_report(),
+            "本次無 FETCH FAILED 來源",
+            "<!-- 本次無 FETCH FAILED 來源 -->",
+        )
+        self.assert_fails(report=report)
+
+    def test_setext_heading_syntax_is_rejected(self):
+        report = replace_once(
+            make_report(),
+            "## 與前期比較",
+            "與前期比較\n----------------",
+        )
+        self.assert_fails(report=report)
+
+    def test_unbalanced_fence_fails(self):
+        self.assert_fails(report=make_report() + "\n```\n")
+
+
+class CoverageAndTraceability(ValidatorCase):
+    def test_macro_raw_value_and_date_must_match_on_the_same_row(self):
+        original = raw_row("monetary.dgs10", "DGS10")
+        correct_date_wrong_value = original.replace("| 4.54 |", "| 9.99 |")
+        correct_value_wrong_date = original.replace(
+            "| 2026-07-10 |", "| 2026-07-09 |"
+        )
+        report = replace_once(
+            make_report(), original,
+            correct_date_wrong_value + "\n" + correct_value_wrong_date,
+        )
+        self.assert_fails(report=report)
+
+
+    def test_sofr_component_cannot_be_satisfied_by_sofr99_prefix(self):
+        sofr = raw_row("monetary.repo_stress_srf", "| SOFR |")
+        sofr99 = raw_row("monetary.repo_stress_srf", "SOFR99")
+        fake_prefix = sofr99.replace("| 4.35 |", "| 4.3 |")
+        report = replace_once(
+            make_report(), sofr + "\n" + sofr99,
+            fake_prefix + "\n" + sofr99,
+        )
+        self.assert_fails(report=report)
+
+
+
+    def test_fabricated_source_id_fails(self):
+        row = coverage_row(CONTRACT["sources"][0]["id"])
+        self.assert_fails(
+            report=replace_once(make_report(), row, row.replace(
+                CONTRACT["sources"][0]["id"], "valuation.fabricated"
+            ))
+        )
+
+    def test_reordered_source_ids_fail(self):
+        first = coverage_row(CONTRACT["sources"][0]["id"])
+        second = coverage_row(CONTRACT["sources"][1]["id"])
+        report = replace_once(make_report(), first + "\n" + second, second + "\n" + first)
+        self.assert_fails(report=report)
+
+    def test_duplicate_source_id_fails(self):
+        first = coverage_row(CONTRACT["sources"][0]["id"])
+        second = coverage_row(CONTRACT["sources"][1]["id"])
+        self.assert_fails(report=replace_once(make_report(), second, first))
+
+    def test_unknown_status_fails(self):
+        row = coverage_row(CONTRACT["sources"][0]["id"])
+        self.assert_fails(report=replace_once(
+            make_report(), row, row.replace("✓ DIRECT", "✓ INVENTED")
+        ))
+
+    def test_multiple_status_tokens_fail(self):
+        row = coverage_row(CONTRACT["sources"][0]["id"])
+        self.assert_fails(report=replace_once(
+            make_report(), row, row.replace("✓ DIRECT", "✓ DIRECT / ✓ API")
+        ))
+
+    def test_required_source_cannot_be_not_disclosed(self):
+        required_id = next(s["id"] for s in CONTRACT["sources"] if s["required"])
+        row = coverage_row(required_id)
+        self.assert_fails(report=replace_once(
+            make_report(), row, row.replace("✓ DIRECT", "✗ NOT DISCLOSED")
+        ))
+
+    def test_missing_search_trace_fails(self):
+        self.assert_fails(report=replace_once(make_report(), TRACE_ROW + "\n", ""))
+
+    def test_nonzero_search_trace_requires_http_url(self):
+        report = replace_once(
+            make_report(),
+            TRACE_ROW,
+            TRACE_ROW.replace(
+                "https://example.com/rename", "ftp://example.com/rename"
+            ),
+        )
+        self.assert_fails(report=report)
+
+    def test_nonzero_search_trace_rejects_bare_https_scheme(self):
+        report = replace_once(
+            make_report(),
+            TRACE_ROW,
+            TRACE_ROW.replace("https://example.com/rename", "https://"),
+        )
+        self.assert_fails(report=report)
+
+    def test_stale_event_trace_date_fails(self):
+        self.assert_fails(report=replace_once(
+            make_report(), TRACE_ROW, TRACE_ROW.replace("2026-07-12", "2026-06-01")
+        ))
+
+    def test_trace_id_must_match_coverage_search_id(self):
+        self.assert_fails(report=replace_once(
+            make_report(), TRACE_ROW, TRACE_ROW.replace(SEARCH_ID, "speculation.fake", 1)
+        ))
+
+    def test_prompt_contract_mapping_mismatch_fails(self):
+        prompt = PROMPT.read_text(encoding="utf-8")
+        needle = CONTRACT["sources"][0]["prompt_match"]
+        self.assertEqual(prompt.count(needle), 1)
+        prompt = prompt.replace(needle, "renamed source that is absent from contract", 1)
+        self.assert_fails(prompt_text=prompt)
+
+    def test_prompt_source_hidden_by_tilde_fence_with_backticks_fails(self):
+        prompt = PROMPT.read_text(encoding="utf-8")
+        needle = CONTRACT["sources"][0]["prompt_match"]
+        source_line = next(
+            line for line in prompt.splitlines()
+            if line.startswith("- ") and needle in line
+        )
+        hidden = f"~~~ audit `source hidden`\n{source_line}\n~~~"
+        self.assert_fails(prompt_text=replace_once(prompt, source_line, hidden))
+
+    def test_successful_direct_source_requires_raw_evidence(self):
+        row = raw_row("valuation.sp500_pe_cape")
+        self.assert_fails(report=replace_once(make_report(), row + "\n", ""))
+
+    def test_direct_event_evidence_obeys_contract_window(self):
+        row = raw_row("speculation.microcap_moonshots")
+        self.assert_fails(report=replace_once(
+            make_report(), row, row.replace("2026-07-12", "2026-06-01")
+        ))
+
+    def test_all_macro_bindings_crosscheck_coverage(self):
+        macro = macro_payload()
+        macro["series"]["CPIAUCSL"] = {"status": "fetch_failed", "source": None}
         self.assert_fails(macro=macro)
 
-    def test_tagged_trigger_evidence_must_declare_matching_reason(self):
-        source_id = "monetary.private_credit_liquidity"
-        coverage = coverage_row(source_id)
-        tagged_row = (
-            f"| {source_id} | [private_credit_gate] liquidity gate | 1 | "
-            f"https://example.com/private-credit-gate | 2026-07-12 | {TIMESTAMP} |"
-        )
-        insertion_point = raw_row("monetary.hy_oas")
+    def test_zero_result_status_is_contract_limited(self):
+        source_id = "valuation.sp500_pe_cape"
+        row = coverage_row(source_id)
         report = replace_once(
-            make_report(), coverage,
-            coverage.replace("✗ NOT DISCLOSED", "✓ DIRECT"),
-        )
-        report = replace_once(
-            report, insertion_point, insertion_point + "\n" + tagged_row
-        )
-        # Score JSON still declares no reasons; tagged trigger evidence must
-        # not silently upgrade the narrative without a persisted reason code.
-        self.assert_fails(report=report)
-
-    def test_baseline_ignores_cross_run_term_premium_trigger(self):
-        macro = macro_payload(baseline=True)
-        macro["series"]["THREEFYTP10"].update({
-            "prior_date": "2026-07-03", "prior": 0.45,
-            "delta_abs": 0.2, "delta_bps": 20.0,
-            "delta_note": (
-                "trailing ~7d within the series' own timeline "
-                "(publication lag; not aligned to prior-run date)"
-            ),
-        })
-        macro["repo_stress"]["iorb"] = 4.29
-        macro["repo_stress"]["iorb_date"] = "2026-07-09"
-        macro["repo_stress"]["sofr_iorb_bps"] = 1.0
-        macro["series"]["IORB"]["alignment_observations"].append({
-            "date": "2026-07-09", "value": 4.29,
-        })
-        self.assert_passes(baseline=True, macro=macro)
-
-    def test_invalid_streak_type_fails_without_traceback(self):
-        report = replace_once(
-            make_report(), '"hy_oas_widening_streak": 0',
-            '"hy_oas_widening_streak": "bad"',
-        )
-        current = score_payload()
-        current["hy_oas_widening_streak"] = "bad"
-        self.assert_fails(report=report, current_score=current)
-
-
-class RequiredStructure(ValidatorCase):
-    def test_locked_locations_reject_this_run_synonyms(self):
-        original = "**結論**：本次位於測試 rubric 區間，依契約計分。"
-        for synonym in CONTRACT["wording_lock"]["forbidden_synonyms"]:
-            with self.subTest(synonym=synonym):
-                report = make_report().replace(
-                    original,
-                    f"**結論**：{synonym}位於測試 rubric 區間，依契約計分。",
-                    1,
-                )
-                self.assert_fails(report=report)
-
-    def test_new_signals_body_rejects_this_run_synonyms(self):
-        original = "- 估值溢價較前次上升 1 分。"
-        for synonym in CONTRACT["wording_lock"]["forbidden_synonyms"]:
-            with self.subTest(synonym=synonym):
-                report = replace_once(
-                    make_report(), original, f"{original}（{synonym}補充）"
-                )
-                proc = self.run_validator(report=report)
-                self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-                self.assertIn(
-                    f"{synonym} appears in a terminology-locked location",
-                    proc.stdout,
-                )
-                self.assertNotIn("Traceback", proc.stdout + proc.stderr)
-
-    def test_triangle_body_rejects_this_run_synonyms(self):
-        original = "- 股市：7,575.39，持平 +0.42%。"
-        for synonym in CONTRACT["wording_lock"]["forbidden_synonyms"]:
-            with self.subTest(synonym=synonym):
-                report = replace_once(
-                    make_report(), original, f"{original}（較{synonym}）"
-                )
-                proc = self.run_validator(report=report)
-                self.assertNotEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-                self.assertIn(
-                    f"{synonym} appears in a terminology-locked location",
-                    proc.stdout,
-                )
-                self.assertNotIn("Traceback", proc.stdout + proc.stderr)
-
-    def test_full_section_wording_lock_follows_renamed_contract_headings(self):
-        validator = load_validator_module()
-        policy = CONTRACT["wording_lock"]
-        synonym = policy["forbidden_synonyms"][0]
-        for heading_index in policy["full_section_heading_indexes"]:
-            with self.subTest(heading_index=heading_index):
-                contract = copy.deepcopy(CONTRACT)
-                renamed = f"## Renamed locked section {heading_index}"
-                contract["headings"][heading_index] = renamed
-                failures = validator.Failures()
-                doc = validator.MarkdownDocument(
-                    f"{renamed}\n\n- ordinary bullet with {synonym}", failures
-                )
-                validator.validate_wording_lock(doc, contract, failures)
-                self.assertTrue(any(
-                    "terminology-locked location" in message
-                    for message in failures.items
-                ), failures.items)
-
-    def test_wording_lock_does_not_reject_ordinary_prose(self):
-        self.assert_passes(report=make_report().replace(
-            "——可稽核輸入。", "——本期可稽核輸入。", 1
-        ))
-
-    def test_missing_full_h2_section_fails(self):
-        report = replace_once(
-            make_report(),
-            "## 機構情緒對照\n\n本次無新機構調查數據。\n\n",
-            "",
+            make_report(), row,
+            row.replace("✓ DIRECT", "✓ SEARCH-VERIFIED（0 件）"),
         )
         self.assert_fails(report=report)
 
-    def test_missing_dimension_h3_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(),
-            "### 2. 市場廣度 — 40（weight 13%，Δ 0）",
-            "市場廣度 rationale：",
-        ))
-
-    def test_dimension_h3_score_mismatch_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(),
-            "### 2. 市場廣度 — 40（weight 13%，Δ 0）",
-            "### 2. 市場廣度 — 41（weight 13%，Δ 0）",
-        ))
-
-    def test_missing_dimension_conclusion_fails(self):
-        block = (
-            "### 1. 估值溢價 — 50（weight 22%，Δ +1）\n\n"
-            "- **測試指標** **1**（2026-07-10，"
-            "https://example.com/valuation.sp500_pe_cape；"
-            "source_ids=valuation.sp500_pe_cape）——可稽核輸入。\n\n"
-            "**結論**：本次位於測試 rubric 區間，依契約計分。"
-        )
-        self.assert_fails(report=replace_once(
-            make_report(),
-            block,
-            block.replace("**結論**：本次位於測試 rubric 區間，依契約計分。", "結論遺失。"),
-        ))
-
-    def test_dimension_bullet_cannot_fabricate_appendix_value_link(self):
-        old = (
-            "- **測試指標** **1**（2026-07-10，"
-            "https://example.com/valuation.sp500_pe_cape；"
-            "source_ids=valuation.sp500_pe_cape）——可稽核輸入。"
-        )
-        new = old.replace("**1**", "**999**")
-        self.assert_fails(report=replace_once(make_report(), old, new))
-
-    def test_monetary_dimension_cannot_omit_required_walcl_input(self):
-        report = make_report()
-        required = next(
-            line for line in report.splitlines()
-            if line.startswith("- WALCL **6800000.0**")
-        )
-        self.assert_fails(report=replace_once(report, required + "\n\n", ""))
-
-    def test_missing_raw_data_table_fails(self):
-        self.assert_fails(report=replace_once(make_report(), RAW_BLOCK, "無 raw data。"))
-
-    def test_appendix_h3_headings_are_required(self):
-        report = make_report()
-        for heading in (
-            "### Raw data\n\n", "### Coverage\n\n",
-            "### SEARCH-VERIFIED traceability\n\n",
-        ):
-            report = replace_once(report, heading, "")
-        self.assert_fails(report=report)
-
-    def test_appendix_table_must_belong_to_its_h3(self):
-        report = replace_once(make_report(), RAW_BLOCK + "\n\n### Coverage", "### Coverage\n\n" + RAW_BLOCK)
-        self.assert_fails(report=report)
-
-    def test_malformed_raw_data_row_fails(self):
-        row = (
-            f"| valuation.sp500_trend | sp500_trend | 7575.39 | "
-            f"API sp500_trend | 2026-07-10 | {TIMESTAMP} |"
-        )
-        bad = "| valuation.sp500_trend | nonsense | fake | not-a-source | not-a-date | yesterday |"
-        self.assert_fails(report=replace_once(make_report(), row, bad))
-
-    def test_missing_checklist_label_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "相似度計算：checklist v2", "相似度計算：自由判斷"
-        ))
-
-    def test_checklist_summary_must_match_section2(self):
-        self.assert_fails(report=replace_once(
-            make_report(),
-            "- 1997 早期建設：命中 7/8 = 90%",
-            "- 1997 早期建設：命中 6/8 = 75%",
-        ))
-
-    def test_anchor_feature_machine_truth_is_recomputed(self):
+    def test_ten_results_is_not_zero_result(self):
+        row = coverage_row(SEARCH_ID)
         report = replace_once(
-            make_report(),
-            "- 1997.1｜命中｜source_ids=—｜contract feature audit",
-            "- 1997.1｜未命中｜source_ids=—｜contract feature audit",
+            make_report(), row,
+            row.replace("✓ SEARCH-VERIFIED", "✓ SEARCH-VERIFIED（10 件）"),
         )
         report = replace_once(
-            report, "- 1997 早期建設：命中 7/8 = 90%",
-            "- 1997 早期建設：命中 6/8 = 75%",
-        )
-        report = replace_once(report, "| 1997 早期建設 | 90% |", "| 1997 早期建設 | 75% |")
-        report = replace_once(report, bar(90), bar(75))
-        report = replace_once(report, "1997 早期建設（90%）", "1997 早期建設（75%）")
-        self.assert_fails(report=report)
-
-    def test_each_anchor_feature_needs_one_audit_line(self):
-        line = "- 1997.1｜命中｜source_ids=—｜contract feature audit\n"
-        self.assert_fails(report=replace_once(make_report(), line, ""))
-
-    def test_missing_high_retreat_audit_label_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "2000/3 高位回落條件：否", "高位回落：否"
-        ))
-
-    def test_missing_triangle_label_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "**格局轉變**：穩定共存 → 穩定共存。", "格局沒有變化。"
-        ))
-
-    def test_trigger_chain_must_assess_both_paths(self):
-        chain = (
-            "**扳機鏈**：A 通膨鏈未啟動；"
-            "[monetary.cpi_yoy] CPIAUCSL yoy_pct=3.0 data_date=2026-07-10；"
-            "[monetary.t5yifr] T5YIFR latest=2.2 delta_bps=0.0 "
-            "data_date=2026-07-10；B 槓桿鏈未啟動。"
-        )
-        self.assert_fails(report=replace_once(
-            make_report(),
-            chain,
-            "**扳機鏈**：",
-        ))
-
-    def test_trigger_chain_cpi_yoy_value_must_match_macro(self):
-        report = replace_once(
-            make_report(),
-            "[monetary.cpi_yoy] CPIAUCSL yoy_pct=3.0 data_date=2026-07-10",
-            "[monetary.cpi_yoy] CPIAUCSL yoy_pct=3.1 data_date=2026-07-10",
+            report, TRACE_ROW, TRACE_ROW.replace("2026-07-12", "—")
         )
         self.assert_fails(report=report)
 
-    def test_trigger_chain_t5yifr_delta_must_match_macro(self):
-        report = replace_once(
-            make_report(),
-            "[monetary.t5yifr] T5YIFR latest=2.2 delta_bps=0.0 "
-            "data_date=2026-07-10",
-            "[monetary.t5yifr] T5YIFR latest=2.2 delta_bps=1.0 "
-            "data_date=2026-07-10",
-        )
-        self.assert_fails(report=report)
-
-    def test_institutional_section_cannot_be_empty(self):
+    def test_future_wrong_timezone_retrieval_timestamp_fails(self):
+        row = raw_row("valuation.sp500_pe_cape")
         self.assert_fails(report=replace_once(
-            make_report(), "\n本次無新機構調查數據。\n\n## 本次新增訊號",
-            "\n## 本次新增訊號",
-        ))
-
-    def test_institutional_no_data_placeholder_must_be_exclusive(self):
-        report = replace_once(
-            make_report(),
-            "本次無新機構調查數據。\n\n## 本次新增訊號",
-            "本次無新機構調查數據。\n\n"
-            "- BofA survey update（2026-07-12）。\n\n## 本次新增訊號",
-        )
-        self.assert_fails(report=report)
-
-    def test_weighted_table_component_mismatch_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "| 估值溢價 | 22% | 50 | 11.00 |", "| 估值溢價 | 22% | 50 | 10.00 |"
-        ))
-
-    def test_missing_weighted_summary_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "加權總分：42.20 → 42【警戒】", "總分為 42。"
-        ))
-
-    def test_new_signals_prior_interval_is_required(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "vs 前次（4天前）", "本次變動"
+            make_report(), row, row.replace(TIMESTAMP, "2099-01-01T00:00:00+00:00")
         ))
 
 
@@ -1870,25 +1903,6 @@ class VixSpxComoveArtifact(ValidatorCase):
         macro["series"]["VIXCLS"]["latest"] = 0.0
         self.assert_fails(macro=macro)
 
-    def test_dimension_bullet_must_disclose_every_window_field(self):
-        comove = macro_payload()["vix_spx_comove"]
-        for fragment in (
-            f"；base_date {comove['base_date']}",
-            f"，window_days {comove['window_days']}",
-        ):
-            with self.subTest(fragment=fragment):
-                self.assert_fails(
-                    report=replace_once(make_report(), fragment, "")
-                )
-
-    def test_dimension_needs_a_bullet_for_the_window_source(self):
-        source_id = "structural.vix_spx_comove"
-        report = make_report()
-        bullet = next(
-            line for line in report.splitlines()
-            if line.startswith("- ") and f"source_ids={source_id}" in line
-        )
-        self.assert_fails(report=replace_once(report, bullet + "\n\n", ""))
 
     def test_unavailable_block_cannot_be_certified_as_api_coverage(self):
         # the VIX level still fetched, but with no verdict the Coverage row
@@ -2108,16 +2122,6 @@ class MacroArtifactHardening(ValidatorCase):
         report = replace_once(
             make_report(), row, row.replace("| 2026-07-10 |", f"| {PRIOR_DATE} |")
         )
-        report = replace_once(
-            report,
-            "| S&P 500 | 7,575.39 | 持平（+0.42%；前次 7,543.64） |",
-            "| S&P 500 | 7,575.39 | 持平（0.00%；無新觀測；前次 7,575.39） |",
-        )
-        report = replace_once(
-            report,
-            "- 股市：7,575.39，持平 +0.42%。",
-            "- 股市：7,575.39，持平 0.00%（無新觀測）。",
-        )
         self.assert_passes(
             report=comove_unavailable_report(report), macro=macro
         )
@@ -2329,148 +2333,6 @@ class MacroArtifactHardening(ValidatorCase):
             "yoy_pct": 13.5,
         })
         self.assert_fails(macro=macro)
-
-
-class MacroTriangleCrossChecks(ValidatorCase):
-    def test_wti_exact_search_fallback_trace_passes(self):
-        report, macro, current = wti_search_fallback_fixture()
-        self.assert_passes(report=report, macro=macro, current_score=current)
-
-    def test_wti_search_fallback_rejects_noncanonical_marker(self):
-        report, macro, current = wti_search_fallback_fixture(
-            "[triangle_fallback] DCOILWTICO fallback=70.25"
-        )
-        self.assert_fails(report=report, macro=macro, current_score=current)
-
-    def test_sp500_value_must_match_macro(self):
-        self.assert_fails(report=replace_once(
-            make_report(),
-            "| S&P 500 | 7,575.39 | 持平（+0.42%；前次 7,543.64） |",
-            "| S&P 500 | 9,999.99 | 持平（+0.42%；前次 7,543.64） |",
-        ))
-
-    def test_sp500_below_threshold_must_be_flat(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "持平（+0.42%；前次 7,543.64）", "▲ +0.42%（前次 7,543.64）"
-        ))
-
-    def test_wti_value_must_match_macro(self):
-        row = "| WTI 原油 | $69.60 /bbl | 持平（0.00%；前次 $69.60） |"
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace("$69.60 /bbl", "$80.00 /bbl")
-        ))
-
-    def test_wti_direction_must_match_macro(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "持平（0.00%；前次 $69.60）", "▼ -1.00%（前次 $69.60）"
-        ))
-
-    def test_ten_year_value_must_match_macro(self):
-        row = "| 10Y Treasury | 4.54% | 持平（0.0 bps；前次 4.54%） |"
-        self.assert_fails(report=replace_once(
-            make_report(), row, row.replace("| 4.54% |", "| 5.54% |")
-        ))
-
-    def test_ten_year_direction_must_match_decomposition(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "持平（0.0 bps；前次 4.54%）", "▲ +5.0 bps（前次 4.54%）"
-        ))
-
-    def test_macro_prior_date_must_match_prior_artifact(self):
-        macro = macro_payload()
-        macro["prior_run_date"] = "2026-07-08"
-        self.assert_fails(macro=macro)
-
-    def test_previous_levels_must_match_macro(self):
-        self.assert_fails(report=replace_once(
-            make_report(), "前次 7,543.64", "前次 99,999"
-        ))
-
-    def test_decomposition_leg_values_must_match_macro(self):
-        self.assert_fails(report=replace_once(
-            make_report(),
-            "- ΔDFII10 實質殖利率週變動：0.0 bps",
-            "- ΔDFII10 實質殖利率週變動：+999 bps",
-        ))
-
-    def test_prompt_precision_rounding_is_accepted(self):
-        report = make_report()
-        report = replace_once(
-            report,
-            "| S&P 500 | 7,575.39 | 持平（+0.42%；前次 7,543.64） |",
-            "| S&P 500 | 7,575 | 持平（+0.4%；前次 7,544） |",
-        )
-        report = replace_once(
-            report, "- 股市：7,575.39，持平 +0.42%。",
-            "- 股市：7,575，持平 +0.4%。",
-        )
-        self.assert_passes(report=report)
-
-
-class SecurityAndCli(ValidatorCase):
-    def test_api_key_query_secret_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(),
-            "API sp500_trend",
-            "https://api.stlouisfed.org/fred?series_id=SP500&api_key=super-secret",
-        ))
-
-    def test_percent_encoded_api_key_query_secret_fails(self):
-        self.assert_fails(report=replace_once(
-            make_report(),
-            "API sp500_trend",
-            "https://api.stlouisfed.org/fred?series_id=SP500&api%5Fkey=super-secret",
-        ))
-
-    def test_missing_all_cli_args_fails_cleanly(self):
-        proc = subprocess.run(
-            [sys.executable, str(VALIDATOR)], capture_output=True, text=True, timeout=20
-        )
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertNotIn("Traceback", proc.stdout + proc.stderr)
-
-    def test_report_only_missing_required_flags_fails_cleanly(self):
-        proc = self.run_validator(include_required_args=False)
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertNotIn("Traceback", proc.stdout + proc.stderr)
-
-    def test_prior_and_baseline_are_mutually_exclusive(self):
-        proc = self.run_validator(extra_args=("--baseline",))
-        self.assertNotEqual(proc.returncode, 0)
-        self.assertNotIn("Traceback", proc.stdout + proc.stderr)
-
-    def test_macro_requires_marker_envelope(self):
-        self.assert_fails(macro_markers=False)
-
-    def test_nonfinite_json_number_fails(self):
-        report = replace_once(
-            make_report(), '"sp500_dev200_pct": 12.0',
-            '"sp500_dev200_pct": Infinity',
-        )
-        current = score_payload()
-        current["sp500_dev200_pct"] = float("inf")
-        self.assert_fails(report=report, current_score=current)
-
-    def test_duplicate_json_key_fails(self):
-        report = replace_once(
-            make_report(), '"date": "2026-07-13",',
-            '"date": "2026-07-13",\n  "date": "2026-07-13",',
-        )
-        self.assert_fails(report=report)
-
-    def test_standalone_current_score_must_equal_report_fence(self):
-        current = score_payload()
-        current["valuation"] = 51
-        current["total"] = 42
-        self.assert_fails(current_score=current)
-
-    def test_dry_run_requires_banner_and_passes_with_it(self):
-        self.assert_passes(dry_run=True)
-        self.assert_fails(report=make_report(), dry_run=True)
-
-    def test_production_rejects_dry_run_banner(self):
-        report = "> [DRY RUN] this report was not committed to archive.\n\n" + make_report()
-        self.assert_fails(report=report)
 
 
 if __name__ == "__main__":

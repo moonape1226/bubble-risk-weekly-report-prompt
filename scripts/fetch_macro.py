@@ -426,6 +426,56 @@ def sp500_trend():
         res["no_new_obs"] = True
     return res
 
+def ndx_drawdown():
+    """NASDAQ-100 drawdown from its trailing 252-trading-day closing high.
+
+    Feeds resolution criterion R1. All 252 observations are emitted so the
+    validator can reproduce the high, the drawdown, and the R1 threshold.
+    """
+    cfg = MACRO_SCHEMA["ndx_drawdown"]
+    sid, lookback = cfg["series"], cfg["lookback_trading_days"]
+    start = (datetime.now(timezone.utc) - timedelta(days=cfg["fetch_back_days"])).strftime("%Y-%m-%d")
+    url = ("https://api.stlouisfed.org/fred/series/observations"
+           f"?series_id={sid}&api_key={FRED_KEY}&file_type=json"
+           f"&observation_start={start}&sort_order=desc")
+    try:
+        data = json.loads(_get(url))
+        raw_observations = data.get("observations", [])
+        if not isinstance(raw_observations, list):
+            raise ValueError("FRED observations is not an array")
+        obs = []
+        for o in raw_observations:
+            if not isinstance(o, dict):
+                raise ValueError("FRED observation is not an object")
+            if not isinstance(o.get("value"), str):
+                raise ValueError("FRED observation value is not a string")
+            if o["value"] == ".":  # FRED's marker for a non-trading day
+                continue
+            observation = parsed_observation(o.get("date"), o.get("value"), positive=True)
+            if not observation:
+                raise ValueError("malformed NASDAQ100 observation")
+            obs.append(observation)
+        obs = canonical_observations(obs)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {"status": "fetch_failed", "source": None}
+    if len(obs) < lookback:
+        return {"status": "fetch_failed", "source": "FRED API"}
+    # Compute from the emitted (rounded) values so the validator reproduces
+    # every derived number from the artifact alone.
+    window = [(d, round(v, 2)) for d, v in obs[:lookback]]
+    latest_date, latest = window[0]
+    high_date, high = max(window, key=lambda o: (o[1], o[0]))
+    threshold = REPORT_CONTRACT["resolution"]["r1"]["drawdown_pct"]
+    drawdown = (high - latest) / high * 100
+    return {"status": "ok", "source": "FRED API", "series": sid,
+            "latest_date": latest_date, "latest": latest,
+            "high_date": high_date, "high": high,
+            "drawdown_pct": round(drawdown, 2),
+            "r1_threshold_pct": threshold,
+            "r1_threshold_level": round(high * (1 - threshold / 100), 2),
+            "r1_met": drawdown >= threshold,
+            "window_observations": [{"date": d, "value": v} for d, v in window]}
+
 def cftc_lev_funds():
     """Aggregate leveraged-fund net position in UST futures (CFTC TFF).
 
@@ -817,6 +867,7 @@ def main():
     for sid, unit in FRED_SERIES.items():
         out["series"][sid] = series_block(sid, unit)
     out["sp500_trend"] = sp500_trend()
+    out["ndx_drawdown"] = ndx_drawdown()
     out["cftc_lev_funds"] = cftc_lev_funds()
     out["move_index"] = move_index()
     out["ofr_repo"] = ofr_repo()

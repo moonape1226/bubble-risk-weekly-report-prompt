@@ -12,14 +12,12 @@ import math
 import re
 import sys
 from datetime import date, datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
 BOX_CHARS = "╔╗╚╝║═╠╣╬┌┐└┘─│├┤┬┴┼"
 DATE_RE = r"\d{4}-\d{2}-\d{2}"
-NUMBER_RE = re.compile(r"[+−-]?\d+(?:\.\d+)?")
 SECRET_PATTERNS = (
     re.compile(r"(?i)\b(?:api[_-]?key|access[_-]?token|password|secret)\s*="),
     re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"),
@@ -171,18 +169,11 @@ def load_json_file(path, label, failures, allow_markers=False,
 
 def validate_contract(contract, failures):
     required = {
-        "version", "timezone", "macro_schema", "disclaimer", "headings", "dimensions",
-        "wording_lock",
-        "tiers", "anchors", "anchor_feature_counts", "regimes",
-        "trigger_states", "monetary_sides", "triangle_indicators",
-        "triangle_labels", "triangle_fallbacks", "dimension_required_inputs",
-        "macro_window_disclosures",
-        "triangle_chain_inputs", "historical_audit_labels",
-        "direction_thresholds", "calibration", "trigger_reason_codes",
-        "spv_deal_marker", "anchor_features", "score_schema",
-        "coverage_statuses", "section1_header", "section2_header",
-        "section3_header", "weighted_score_header", "coverage_header",
-        "raw_data_header", "traceability_header", "sources",
+        "version", "timezone", "question", "resolution", "headings",
+        "wording_lock", "conclusion_line", "evidence_sections",
+        "forecast_schema", "disclaimer", "macro_schema", "calibration",
+        "coverage_statuses", "coverage_header", "raw_data_header",
+        "traceability_header", "appendix_headings", "spv_deal_marker", "sources",
     }
     if not isinstance(contract, dict):
         failures.add("report contract must be a JSON object")
@@ -192,10 +183,10 @@ def validate_contract(contract, failures):
         failures.add(f"report contract missing keys: {sorted(missing)}")
         return False
     try:
-        if contract["version"] != 1:
+        if contract["version"] != 2:
             failures.add(f"unsupported report contract version: {contract['version']!r}")
         macro_schema = contract["macro_schema"]
-        if macro_schema.get("version") != 1:
+        if macro_schema.get("version") != 2:
             failures.add("unsupported macro schema version in contract")
         if len(macro_schema["required_series"]) != 21 or len(
                 set(macro_schema["required_series"])) != 21:
@@ -236,28 +227,129 @@ def validate_contract(contract, failures):
         if len(set(macro_schema["required_blocks"])) != len(
                 macro_schema["required_blocks"]):
             failures.add("contract macro blocks are not unique")
-        dimensions = contract["dimensions"]
-        if len(dimensions) != 6:
-            failures.add("contract must define exactly six dimensions")
-        if sum(d["weight"] for d in dimensions) != 100:
-            failures.add("contract dimension weights must sum to 100")
-        if len({d["name"] for d in dimensions}) != len(dimensions):
-            failures.add("contract dimension names are not unique")
-        if len({d["key"] for d in dimensions}) != len(dimensions):
-            failures.add("contract dimension keys are not unique")
-        if len(contract["headings"]) != 10 or len(set(contract["headings"])) != 10:
-            failures.add("contract must define ten unique H2 headings")
+        if "ndx_drawdown" not in macro_schema["required_blocks"]:
+            failures.add("contract macro blocks must include ndx_drawdown")
+
+        question = contract["question"]
+        if (not isinstance(question, dict)
+                or set(question) != {"version", "text", "horizon_days", "answers"}
+                or type(question["version"]) is not int
+                or not isinstance(question["text"], str) or not question["text"]
+                or type(question["horizon_days"]) is not int
+                or question["horizon_days"] <= 0
+                or question["answers"] != ["yes", "no"]):
+            failures.add("contract question is invalid")
+            return False
+        answers = question["answers"]
+        resolution = contract["resolution"]
+        r1 = resolution.get("r1") if isinstance(resolution, dict) else None
+        if (not isinstance(resolution, dict)
+                or set(resolution) != {"version", "block", "r1", "paths"}
+                or type(resolution["version"]) is not int
+                or not isinstance(resolution["block"], str)
+                or not resolution["block"].strip()
+                or not isinstance(r1, dict)
+                or set(r1) != {"series", "lookback_trading_days", "drawdown_pct"}
+                or not isinstance(r1["series"], str)
+                or type(r1["lookback_trading_days"]) is not int
+                or r1["lookback_trading_days"] <= 0
+                or not finite_number(r1["drawdown_pct"])
+                or not 0 < r1["drawdown_pct"] < 100):
+            failures.add("contract resolution is invalid")
+            return False
+        ndx_cfg = macro_schema.get("ndx_drawdown")
+        if (not isinstance(ndx_cfg, dict)
+                or ndx_cfg.get("series") != r1["series"]
+                or ndx_cfg.get("lookback_trading_days")
+                != r1["lookback_trading_days"]
+                or type(ndx_cfg.get("fetch_back_days")) is not int):
+            failures.add("contract macro ndx_drawdown policy conflicts with resolution.r1")
+        ids = [source["id"] for source in contract["sources"]]
+        if not ids or len(set(ids)) != len(ids):
+            failures.add("contract must define a nonempty set of unique source IDs")
+        source_ids = set(ids)
+        paths = resolution["paths"]
+        if (not isinstance(paths, list) or len(paths) != 3
+                or [p.get("id") for p in paths] != ["R1", "R2", "R3"]
+                or any(not isinstance(p.get("heading"), str)
+                       or not p["heading"].startswith("### ")
+                       or not isinstance(p.get("source_ids"), list)
+                       or not p["source_ids"]
+                       or not set(p["source_ids"]) <= source_ids
+                       for p in paths)
+                or len({p["heading"] for p in paths}) != 3):
+            failures.add("contract resolution paths are invalid")
+
+        headings = contract["headings"]
+        if (not isinstance(headings, list) or len(headings) != 9
+                or len(set(headings)) != 9
+                or any(not isinstance(h, str) or not h.startswith("## ")
+                       for h in headings)):
+            failures.add("contract must define nine unique H2 headings")
+            return False
+        appendix_headings = contract["appendix_headings"]
+        if (not isinstance(appendix_headings, list) or len(appendix_headings) != 3
+                or len(set(appendix_headings)) != 3
+                or any(not isinstance(h, str) or not h.startswith("### ")
+                       for h in appendix_headings)):
+            failures.add("contract appendix_headings must be three unique H3 headings")
+        spv_marker = contract["spv_deal_marker"]
+        if not isinstance(spv_marker, dict) or set(spv_marker) != {
+                "source_id", "component_id", "tag", "required_keys", "keywords"}:
+            failures.add("contract spv_deal_marker is invalid")
+        else:
+            marker_source = next(
+                (source for source in contract["sources"]
+                 if source["id"] == spv_marker.get("source_id")),
+                None,
+            )
+            if marker_source is None:
+                failures.add("contract spv_deal_marker source_id is unknown")
+            elif marker_source.get("window") != "composite":
+                failures.add("contract spv_deal_marker source is not a composite source")
+            else:
+                marker_component = next(
+                    (item for item in marker_source.get("window_components", [])
+                     if item.get("id") == spv_marker.get("component_id")),
+                    None,
+                )
+                if marker_component is None:
+                    failures.add("contract spv_deal_marker component_id is invalid")
+                elif marker_component.get("window") != "30d":
+                    failures.add(
+                        "contract spv_deal_marker component is not a 30d event scan"
+                    )
+            if not re.fullmatch(r"\[[a-z_]+\]", spv_marker.get("tag", "")):
+                failures.add("contract spv_deal_marker lacks a stable tag")
+            required_keys = spv_marker.get("required_keys")
+            if (not isinstance(required_keys, list) or not required_keys
+                    or any(not isinstance(key, str) or not re.fullmatch(r"[a-z_]+", key)
+                           for key in required_keys)
+                    or len(required_keys) != len(set(required_keys))):
+                failures.add("contract spv_deal_marker required_keys is invalid")
+            keywords = spv_marker.get("keywords")
+            if (not isinstance(keywords, list) or not keywords
+                    or any(not isinstance(keyword, str) or not keyword.strip()
+                           for keyword in keywords)
+                    or len(keywords) != len(set(keywords))):
+                failures.add("contract spv_deal_marker keywords is invalid")
+
         wording_lock = contract["wording_lock"]
         if (not isinstance(wording_lock, dict)
                 or set(wording_lock) != {
-                    "full_section_heading_indexes", "forbidden_synonyms"}):
+                    "full_section_heading_indexes", "forbidden_synonyms",
+                    "forbidden_scoring_terms"}
+                or not isinstance(wording_lock["forbidden_scoring_terms"], list)
+                or not wording_lock["forbidden_scoring_terms"]
+                or any(not isinstance(term, str) or not term.strip()
+                       for term in wording_lock["forbidden_scoring_terms"])):
             failures.add("contract wording_lock is invalid")
         else:
             locked_indexes = wording_lock["full_section_heading_indexes"]
             forbidden_synonyms = wording_lock["forbidden_synonyms"]
             if (not isinstance(locked_indexes, list) or not locked_indexes
                     or any(type(index) is not int
-                           or not 0 <= index < len(contract["headings"])
+                           or not 0 <= index < len(headings)
                            for index in locked_indexes)
                     or len(locked_indexes) != len(set(locked_indexes))):
                 failures.add("contract wording-lock section indexes are invalid")
@@ -267,81 +359,44 @@ def validate_contract(contract, failures):
                            for term in forbidden_synonyms)
                     or len(forbidden_synonyms) != len(set(forbidden_synonyms))):
                 failures.add("contract wording-lock synonyms are invalid")
-        ids = [source["id"] for source in contract["sources"]]
-        if not ids or len(set(ids)) != len(ids):
-            failures.add("contract must define a nonempty set of unique source IDs")
-        if list(contract["anchor_feature_counts"]) != contract["anchors"]:
-            failures.add("contract anchor counts must follow anchor order")
-        if list(contract["anchor_features"]) != contract["anchors"]:
-            failures.add("contract anchor features must follow anchor order")
-        feature_ids = []
-        for anchor in contract["anchors"]:
-            features = contract["anchor_features"][anchor]
-            if len(features) != contract["anchor_feature_counts"][anchor]:
-                failures.add(f"contract feature count mismatch for {anchor}")
-            feature_ids.extend(feature["id"] for feature in features)
-        if len(feature_ids) != len(set(feature_ids)):
-            failures.add("contract anchor feature IDs are not unique")
-        tiers = contract["tiers"]
-        if tiers[0]["min"] != 0 or tiers[-1]["max"] != 100:
-            failures.add("contract tiers must cover 0 through 100")
-        for left, right in zip(tiers, tiers[1:]):
-            if left["max"] + 1 != right["min"]:
-                failures.add("contract tiers are not contiguous")
-        source_ids = set(ids)
-        fallbacks = contract["triangle_fallbacks"]
-        if ([item.get("key") for item in fallbacks]
-                != ["sp500", "wti", "dgs10"]
-                or len({item.get("source_id") for item in fallbacks}) != 3
-                or not all(item.get("source_id") in source_ids
-                           and isinstance(item.get("component"), str)
-                           and item["component"] for item in fallbacks)):
-            failures.add("contract triangle_fallbacks is invalid")
-        required_inputs = contract["dimension_required_inputs"]
-        if set(required_inputs) != {"monetary"} or not isinstance(
-                required_inputs.get("monetary"), list):
-            failures.add("contract dimension_required_inputs is invalid")
-        else:
-            for requirement in required_inputs["monetary"]:
-                if (not isinstance(requirement, dict)
-                        or set(requirement) != {"source_id", "indicator"}
-                        or requirement.get("source_id") not in source_ids
-                        or (requirement.get("indicator") is not None
-                            and not isinstance(requirement["indicator"], str))):
-                    failures.add("contract monetary input requirement is invalid")
-        disclosures = contract["macro_window_disclosures"]
-        dimension_keys = {dimension["key"] for dimension in dimensions}
-        if not isinstance(disclosures, list) or not disclosures:
-            failures.add("contract macro_window_disclosures is invalid")
-        else:
-            for disclosure in disclosures:
-                if (not isinstance(disclosure, dict)
-                        or set(disclosure) != {
-                            "source_id", "dimension_key", "block", "fields"}
-                        or disclosure["source_id"] not in source_ids
-                        or disclosure["dimension_key"] not in dimension_keys
-                        or disclosure["block"] not in macro_schema["required_blocks"]
-                        or not isinstance(disclosure["fields"], list)
-                        or not disclosure["fields"]
-                        or any(not isinstance(field, str) or not field
-                               for field in disclosure["fields"])
-                        or len(disclosure["fields"]) != len(set(disclosure["fields"]))):
-                    failures.add("contract macro window disclosure is invalid")
-        chain_inputs = contract["triangle_chain_inputs"]
-        if (not isinstance(chain_inputs, list) or len(chain_inputs) != 2
-                or [item.get("series") for item in chain_inputs]
-                != ["CPIAUCSL", "T5YIFR"]):
-            failures.add("contract triangle_chain_inputs is invalid")
-        else:
-            for requirement in chain_inputs:
-                if (set(requirement) != {
-                        "source_id", "series", "value_field", "delta_field"}
-                        or requirement["source_id"] not in source_ids
-                        or requirement["series"] not in macro_schema["required_series"]
-                        or not isinstance(requirement["value_field"], str)
-                        or (requirement["delta_field"] is not None
-                            and not isinstance(requirement["delta_field"], str))):
-                    failures.add("contract triangle chain input is invalid")
+        conclusion = contract["conclusion_line"]
+        if (not isinstance(conclusion, dict) or set(conclusion) != set(answers)
+                or any(not isinstance(line, str) or not line
+                       for line in conclusion.values())
+                or len(set(conclusion.values())) != len(conclusion)):
+            failures.add("contract conclusion_line is invalid")
+        evidence = contract["evidence_sections"]
+        if (not isinstance(evidence, dict)
+                or set(evidence) != {"heading_indexes", "min_bullets", "citation"}
+                or not isinstance(evidence["heading_indexes"], list)
+                or not evidence["heading_indexes"]
+                or any(type(i) is not int or not 0 <= i < len(headings)
+                       for i in evidence["heading_indexes"])
+                or len(set(evidence["heading_indexes"]))
+                != len(evidence["heading_indexes"])
+                or type(evidence["min_bullets"]) is not int
+                or evidence["min_bullets"] < 1):
+            failures.add("contract evidence_sections is invalid")
+        schema = contract["forecast_schema"]
+        fields = schema.get("current_fields") if isinstance(schema, dict) else None
+        if (not isinstance(fields, list)
+                or len(fields) != len(set(fields))
+                or not {"date", "iso_week", "weekday", "timezone",
+                        "question_version", "resolution_version", "answer",
+                        "horizon_end", "prior_date", "prior_answer",
+                        "flip_evidence", "r1_drawdown_pct", "resolution"
+                        } == set(fields)):
+            failures.add("contract forecast_schema.current_fields is invalid")
+        calibration = contract["calibration"]
+        if (not isinstance(calibration, dict) or set(calibration) != {
+                "decomposition_identity_tolerance_bps", "vix_comove_chg_pct",
+                "vix_comove_sp500_chg_pct", "vix_comove_trailing_days"}
+                or any(not finite_number(v) or v <= 0
+                       for v in calibration.values())):
+            failures.add("contract calibration is invalid")
+        if not isinstance(contract["disclaimer"], str) or not contract["disclaimer"]:
+            failures.add("contract disclaimer is invalid")
+
         zero_ids = {
             source["id"] for source in contract["sources"]
             if source.get("zero_result_allowed")
@@ -389,120 +444,6 @@ def validate_contract(contract, failures):
         }
         if bound_blocks != uncovered_blocks:
             failures.add("source macro bindings do not cover reportable macro blocks")
-        for reason in contract["trigger_reason_codes"].values():
-            if reason.get("state") not in contract["trigger_states"]:
-                failures.add("trigger reason has invalid state")
-            if reason.get("kind") not in ("machine", "evidence"):
-                failures.add("trigger reason has invalid kind")
-            if not set(reason.get("source_ids", [])) <= source_ids:
-                failures.add("trigger reason refers to an unknown source ID")
-            if reason.get("kind") == "evidence":
-                if not re.fullmatch(r"\[[a-z_]+\]", reason.get("evidence_tag", "")):
-                    failures.add("evidence trigger reason lacks a stable evidence_tag")
-                if reason.get("window") not in ("7d", "14d", "30d", "90d"):
-                    failures.add("evidence trigger reason has invalid evidence window")
-                if "trace_required" in reason and type(reason["trace_required"]) is not bool:
-                    failures.add("trigger reason trace_required must be boolean")
-        evidence_tags = [
-            reason.get("evidence_tag")
-            for reason in contract["trigger_reason_codes"].values()
-            if reason.get("kind") == "evidence"
-        ]
-        if len(evidence_tags) != len(set(evidence_tags)):
-            failures.add("trigger evidence tags are not unique")
-
-        spv_marker = contract["spv_deal_marker"]
-        if not isinstance(spv_marker, dict) or set(spv_marker) != {
-                "source_id", "component_id", "tag", "required_keys", "keywords"}:
-            failures.add("contract spv_deal_marker is invalid")
-        else:
-            marker_source = next(
-                (source for source in contract["sources"]
-                 if source["id"] == spv_marker.get("source_id")),
-                None,
-            )
-            if marker_source is None:
-                failures.add("contract spv_deal_marker source_id is unknown")
-            elif marker_source.get("window") != "composite":
-                failures.add("contract spv_deal_marker source is not a composite source")
-            else:
-                marker_component = next(
-                    (item for item in marker_source.get("window_components", [])
-                     if item.get("id") == spv_marker.get("component_id")),
-                    None,
-                )
-                if marker_component is None:
-                    failures.add("contract spv_deal_marker component_id is invalid")
-                elif marker_component.get("window") != "30d":
-                    failures.add(
-                        "contract spv_deal_marker component is not a 30d event scan"
-                    )
-            if not re.fullmatch(r"\[[a-z_]+\]", spv_marker.get("tag", "")):
-                failures.add("contract spv_deal_marker lacks a stable tag")
-            elif spv_marker["tag"] in evidence_tags:
-                failures.add("contract spv_deal_marker tag collides with a trigger evidence_tag")
-            required_keys = spv_marker.get("required_keys")
-            if (not isinstance(required_keys, list) or not required_keys
-                    or any(not isinstance(key, str) or not re.fullmatch(r"[a-z_]+", key)
-                           for key in required_keys)
-                    or len(required_keys) != len(set(required_keys))):
-                failures.add("contract spv_deal_marker required_keys is invalid")
-            keywords = spv_marker.get("keywords")
-            if (not isinstance(keywords, list) or not keywords
-                    or any(not isinstance(keyword, str) or not keyword.strip()
-                           for keyword in keywords)
-                    or len(keywords) != len(set(keywords))):
-                failures.add("contract spv_deal_marker keywords is invalid")
-
-        score_keys = {dimension["key"] for dimension in dimensions}
-        macro_roots = {"series", *macro_schema["required_blocks"]}
-
-        def validate_rule(rule, where):
-            if not isinstance(rule, dict):
-                failures.add(f"{where} rule must be an object")
-                return
-            kind = rule.get("type")
-            simple_score = {"score_between", "score_lt", "score_gte", "score_delta_gte"}
-            if kind in simple_score and rule.get("key") not in score_keys:
-                failures.add(f"{where} rule has invalid score key")
-            if kind == "evidence":
-                ids_in_rule = rule.get("source_ids")
-                if (not isinstance(ids_in_rule, list) or not ids_in_rule
-                        or not set(ids_in_rule) <= source_ids):
-                    failures.add(f"{where} evidence rule has invalid source IDs")
-            elif kind in ("all", "any"):
-                children = rule.get("rules")
-                if not isinstance(children, list) or not children:
-                    failures.add(f"{where} logical rule must have children")
-                else:
-                    for child_index, child in enumerate(children):
-                        validate_rule(child, f"{where}.{child_index}")
-            elif kind in ("macro_compare", "macro_equals"):
-                path = rule.get("path")
-                if (not isinstance(path, list) or len(path) < 2
-                        or not all(isinstance(part, str) for part in path)
-                        or path[0] not in macro_roots):
-                    failures.add(f"{where} macro rule has invalid path")
-                if kind == "macro_compare" and rule.get("op") not in {
-                        "lt", "le", "gt", "ge", "eq"}:
-                    failures.add(f"{where} macro rule has invalid operator")
-            elif kind == "trigger_eq" and rule.get("value") not in contract["trigger_states"]:
-                failures.add(f"{where} trigger rule has invalid value")
-            elif kind == "trigger_gte" and rule.get("value") not in contract["trigger_states"]:
-                failures.add(f"{where} trigger-rank rule has invalid value")
-            elif kind == "monetary_side_eq" and rule.get("value") not in contract["monetary_sides"]:
-                failures.add(f"{where} monetary-side rule has invalid value")
-            elif kind not in simple_score | {
-                    "evidence", "all", "any", "macro_compare", "macro_equals",
-                    "trigger_eq", "trigger_gte", "monetary_side_eq", "high_retreat"}:
-                failures.add(f"{where} has unknown rule type {kind!r}")
-
-        for anchor in contract["anchors"]:
-            for feature in contract["anchor_features"][anchor]:
-                validate_rule(feature.get("rule"), f"anchor feature {feature.get('id')}")
-        for code, reason in contract["trigger_reason_codes"].items():
-            if "prerequisite" in reason:
-                validate_rule(reason["prerequisite"], f"trigger reason {code}")
     except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
         failures.add(f"malformed report contract: {exc}")
         return False
@@ -701,118 +642,6 @@ def find_table(section_lines, header, where, failures):
     return rows
 
 
-def tier_for(total, contract):
-    for item in contract["tiers"]:
-        if item["min"] <= total <= item["max"]:
-            return item["name"]
-    return None
-
-
-def weighted_total(values, contract):
-    numerator = sum(
-        values[dimension["key"]] * dimension["weight"]
-        for dimension in contract["dimensions"]
-    )
-    return (numerator + 50) // 100, Decimal(numerator) / Decimal(100)
-
-
-def validate_score_object(score, contract, failures, label="score.json", exact=True):
-    if not isinstance(score, dict):
-        failures.add(f"{label} must be a JSON object")
-        return False
-    fields = set(contract["score_schema"]["current_fields"])
-    if exact and set(score) != fields:
-        failures.add(
-            f"{label} fields mismatch: missing {sorted(fields - set(score))}, "
-            f"extra {sorted(set(score) - fields)}"
-        )
-        return False
-    dimensions = contract["dimensions"]
-    numeric_ok = True
-    for dimension in dimensions:
-        key = dimension["key"]
-        value = score.get(key)
-        if type(value) is not int or not 0 <= value <= 100:
-            failures.add(f"{label}.{key} must be an integer from 0 to 100")
-            numeric_ok = False
-    total = score.get("total")
-    if type(total) is not int or not 0 <= total <= 100:
-        failures.add(f"{label}.total must be an integer from 0 to 100")
-        numeric_ok = False
-    if numeric_ok:
-        expected_total, _ = weighted_total(score, contract)
-        if total != expected_total:
-            failures.add(f"{label}.total {total} != weighted half-up {expected_total}")
-        expected_tier = tier_for(total, contract)
-        if score.get("tier") != expected_tier:
-            failures.add(f"{label}.tier {score.get('tier')!r} != {expected_tier!r}")
-    if exact or "trigger_reasons" in score:
-        reasons = score.get("trigger_reasons")
-        allowed = list(contract["trigger_reason_codes"])
-        if not isinstance(reasons, list) or any(
-                not isinstance(item, str) for item in reasons):
-            failures.add(f"{label}.trigger_reasons must be an array of reason-code strings")
-        elif len(reasons) != len(set(reasons)) or any(
-                item not in allowed for item in reasons):
-            failures.add(f"{label}.trigger_reasons contains duplicate/unknown codes")
-        elif reasons != [item for item in allowed if item in reasons]:
-            failures.add(f"{label}.trigger_reasons must follow contract order")
-    dev = score.get("sp500_dev200_pct")
-    if dev is not None and (
-            type(dev) not in (int, float) or not math.isfinite(dev)):
-        failures.add(f"{label}.sp500_dev200_pct must be a finite number or null")
-    return numeric_ok
-
-
-def validate_prior(prior, contract, failures):
-    failure_count = len(failures.items)
-    required = set(contract["score_schema"]["legacy_prior_required_fields"])
-    recognized = set(contract["score_schema"]["current_fields"])
-    if not isinstance(prior, dict):
-        failures.add("prior score must be a JSON object")
-        return None
-    if not required <= set(prior):
-        failures.add(f"prior score missing legacy fields: {sorted(required - set(prior))}")
-        return None
-    unknown = set(prior) - recognized
-    if unknown:
-        failures.add(f"prior score has unknown fields: {sorted(unknown)}")
-    validate_score_object(prior, contract, failures, "prior score", exact=False)
-
-    prior_day = None
-    if "date" in prior:
-        prior_day = strict_date(prior["date"], "prior score date", failures)
-    if prior_day and "iso_week" in prior:
-        expected_week = (
-            f"{prior_day.isocalendar().year}-W{prior_day.isocalendar().week:02d}"
-        )
-        if prior["iso_week"] != expected_week:
-            failures.add("prior score iso_week does not match its date")
-    if prior_day and "weekday" in prior and prior["weekday"] != prior_day.strftime("%A"):
-        failures.add("prior score weekday does not match its date")
-    if "timezone" in prior and prior["timezone"] != contract["timezone"]:
-        failures.add("prior score timezone does not match contract")
-    if "regime" in prior and prior["regime"] not in contract["regimes"]:
-        failures.add("prior score regime is invalid")
-    if "trigger_state" in prior and prior["trigger_state"] not in contract["trigger_states"]:
-        failures.add("prior score trigger_state is invalid")
-    if "monetary_side" in prior and prior["monetary_side"] not in contract["monetary_sides"]:
-        failures.add("prior score monetary_side is invalid")
-    if "hy_oas_widening_streak" in prior:
-        streak = prior["hy_oas_widening_streak"]
-        if type(streak) is not int or streak < 0:
-            failures.add("prior score hy_oas_widening_streak must be a nonnegative integer")
-    if "sp500_dev200_pct" in prior:
-        value = prior["sp500_dev200_pct"]
-        if value is not None and (
-                type(value) not in (int, float) or not math.isfinite(value)):
-            failures.add("prior score sp500_dev200_pct must be finite numeric or null")
-
-    merged = dict(contract["score_schema"]["legacy_prior_defaults"])
-    merged.update(prior)
-    return None if len(failures.items) != failure_count else merged
-
-
 def bounded_proof_pairs(proof, label, failures, latest_day=None, latest_value=None):
     """Validate a bounded alignment proof; return [(date, value)] newest first."""
     if not isinstance(proof, list) or not 1 <= len(proof) <= 32:
@@ -899,6 +728,96 @@ def expected_comove_legs(macro, contract):
             sp500_chg_pct >= contract["calibration"]["vix_comove_sp500_chg_pct"]
             and vix_chg_pct >= contract["calibration"]["vix_comove_chg_pct"]),
     }
+
+
+NDX_SUCCESS_FIELDS = {
+    "series", "latest_date", "latest", "high_date", "high", "drawdown_pct",
+    "r1_threshold_pct", "r1_threshold_level", "r1_met", "window_observations",
+}
+
+
+def validate_ndx_drawdown(macro, contract, generated, failures):
+    """Reproduce the R1 drawdown block from its own 252 closing observations."""
+    block = macro.get("ndx_drawdown")
+    if not isinstance(block, dict):
+        return
+    status = block.get("status")
+    if status not in ("ok", "fetch_failed"):
+        failures.add("macro block ndx_drawdown has invalid status")
+        return
+    if status == "fetch_failed":
+        stale = sorted(NDX_SUCCESS_FIELDS & set(block))
+        if stale:
+            failures.add(
+                f"macro block ndx_drawdown fetch_failed retains success fields: {stale}"
+            )
+        return
+    cfg = contract["macro_schema"]["ndx_drawdown"]
+    r1 = contract["resolution"]["r1"]
+    if set(block) != NDX_SUCCESS_FIELDS | {"status", "source"}:
+        failures.add(
+            "macro block ndx_drawdown fields mismatch: "
+            f"missing {sorted(NDX_SUCCESS_FIELDS | {'status', 'source'} - set(block))}, "
+            f"extra {sorted(set(block) - NDX_SUCCESS_FIELDS - {'status', 'source'})}"
+        )
+        return
+    if not isinstance(block["source"], str) or not block["source"]:
+        failures.add("macro block ndx_drawdown success lacks source")
+    if block["series"] != cfg["series"]:
+        failures.add("macro block ndx_drawdown.series does not match contract")
+    window = block["window_observations"]
+    if not isinstance(window, list) or len(window) != cfg["lookback_trading_days"]:
+        failures.add(
+            "macro block ndx_drawdown.window_observations must hold exactly "
+            f"{cfg['lookback_trading_days']} observations"
+        )
+        return
+    pairs = []
+    for index, observation in enumerate(window):
+        if (not isinstance(observation, dict)
+                or set(observation) != {"date", "value"}
+                or not finite_number(observation.get("value"))
+                or observation["value"] <= 0):
+            failures.add(f"macro ndx_drawdown observation {index} is malformed")
+            return
+        day = strict_date(
+            observation["date"], f"macro ndx_drawdown observation date {index}",
+            failures,
+        )
+        if day is None:
+            return
+        pairs.append((day, observation["value"]))
+    days = [day for day, _value in pairs]
+    if days != sorted(days, reverse=True) or len(days) != len(set(days)):
+        failures.add("macro ndx_drawdown observation dates are not unique newest-first")
+        return
+    latest_day = strict_date(
+        block["latest_date"], "macro block ndx_drawdown latest_date", failures
+    )
+    if latest_day and generated and latest_day > generated.date():
+        failures.add("macro block ndx_drawdown latest_date is after generated_at")
+    if (latest_day, block["latest"]) != pairs[0]:
+        failures.add("macro ndx_drawdown latest/latest_date != window_observations[0]")
+        return
+    high = max(value for _day, value in pairs)
+    if block["high"] != high:
+        failures.add("macro ndx_drawdown.high != max of window_observations")
+    high_day = strict_date(
+        block["high_date"], "macro block ndx_drawdown high_date", failures
+    )
+    if high_day and (high_day, block["high"]) not in pairs:
+        failures.add("macro ndx_drawdown high_date/high is absent from window_observations")
+    if not finite_number(block["drawdown_pct"]) or block["drawdown_pct"] != round(
+            (high - pairs[0][1]) / high * 100, 2):
+        failures.add("macro ndx_drawdown.drawdown_pct arithmetic is invalid")
+    threshold = r1["drawdown_pct"]
+    if block["r1_threshold_pct"] != threshold:
+        failures.add("macro ndx_drawdown.r1_threshold_pct does not match contract")
+    if block["r1_threshold_level"] != round(high * (1 - threshold / 100), 2):
+        failures.add("macro ndx_drawdown.r1_threshold_level arithmetic is invalid")
+    if type(block["r1_met"]) is not bool or block["r1_met"] != (
+            (high - pairs[0][1]) / high * 100 >= threshold):
+        failures.add("macro ndx_drawdown.r1_met is inconsistent with the drawdown")
 
 
 def validate_macro_shape(macro, contract, failures):
@@ -1761,6 +1680,7 @@ def validate_macro_shape(macro, contract, failures):
                 failures.add(
                     f"macro decomposition driver {driver!r} != {expected_driver!r}"
                 )
+    validate_ndx_drawdown(macro, contract, generated, failures)
     return len(failures.items) == failure_count
 
 
@@ -1829,14 +1749,6 @@ def validate_prompt_mapping(prompt, contract, failures):
             )
 
 
-def extract_number(text):
-    match = NUMBER_RE.search(text.replace(",", ""))
-    if not match:
-        return None
-    try:
-        return float(match.group().replace("−", "-"))
-    except ValueError:
-        return None
 
 
 DISPLAY_NUMBER_RE = re.compile(r"[+−-]?\d[\d,]*(?:\.\d+)?")
@@ -1860,14 +1772,6 @@ def extract_display_number(text, last=False):
         return None, None
 
 
-def extract_trace_evidence_number(text):
-    """Read the last value-like number after removing machine identifiers."""
-    if not isinstance(text, str):
-        return None
-    # Digits inside DGS10/SOFR99/BAMLC0A0CM are identifiers, not evidence.
-    without_ids = re.sub(r"\b[A-Z][A-Z0-9.^_-]{1,}\b", " ", text)
-    value, _tolerance = extract_display_number(without_ids, last=True)
-    return value
 
 
 def displayed_matches(text, expected, last=False):
@@ -1877,1402 +1781,6 @@ def displayed_matches(text, expected, last=False):
     return value is not None and abs(value - expected) <= tolerance
 
 
-def displayed_contains(text, expected):
-    if type(expected) not in (int, float) or not math.isfinite(expected):
-        return False
-    for match in DISPLAY_NUMBER_RE.finditer(text):
-        token = match.group().replace(",", "").replace("−", "-")
-        decimals = len(token.rsplit(".", 1)[1]) if "." in token else 0
-        try:
-            if abs(float(token) - expected) <= 0.5 * (10 ** -decimals) + 1e-9:
-                return True
-        except ValueError:
-            pass
-    return False
-
-
-def direction(value, threshold):
-    if type(value) not in (int, float):
-        return None
-    if abs(value) < threshold:
-        return "flat"
-    return "up" if value > 0 else "down"
-
-
-def trusted_decomposition_leg(macro, key):
-    block = macro.get("decomposition", {})
-    if block.get("status") not in ("ok", "unavailable_no_daily_history"):
-        return None
-    value = block.get(key)
-    return value if type(value) in (int, float) and math.isfinite(value) else None
-
-
-def expected_regime(macro, baseline, contract):
-    if baseline:
-        return "基準日", {"sp500": None, "wti": None, "dgs10": None}
-    series = macro.get("series", {}) if isinstance(macro, dict) else {}
-    sp500 = macro.get("sp500_trend", {}) if isinstance(macro, dict) else {}
-    decomposition = macro.get("decomposition", {}) if isinstance(macro, dict) else {}
-    values = {
-        "sp500": sp500.get("chg_pct") if sp500.get("status") == "ok" else None,
-        "wti": series.get("DCOILWTICO", {}).get("chg_pct")
-        if series.get("DCOILWTICO", {}).get("status") == "ok" else None,
-        "dgs10": trusted_decomposition_leg(macro, "d_dgs10_bps"),
-    }
-    thresholds = contract["direction_thresholds"]
-    directions = {
-        "sp500": direction(values["sp500"], thresholds["sp500_chg_pct"]),
-        "wti": direction(values["wti"], thresholds["wti_chg_pct"]),
-        "dgs10": direction(values["dgs10"], thresholds["dgs10_delta_bps"]),
-    }
-    if any(value is None for value in directions.values()):
-        return "不可判", directions
-    if all(value == "up" for value in directions.values()):
-        dev = sp500.get("dev200_pct")
-        if type(dev) in (int, float) and dev >= contract["calibration"]["sp500_high_deviation_pct"]:
-            return "同向偏高", directions
-    if "up" in directions.values() and "down" in directions.values():
-        return "分歧", directions
-    return "穩定共存", directions
-
-
-def direction_cell_matches(cell, expected, no_new_obs=False):
-    value = cell.strip()
-    if expected is None:
-        return value == "—"
-    if expected == "up":
-        return value.startswith("▲")
-    if expected == "down":
-        return value.startswith("▼")
-    if expected == "flat":
-        if not value.startswith("持平"):
-            return False
-        return ("無新觀測" in value) if no_new_obs else ("無新觀測" not in value)
-    return False
-
-
-def parse_delta_cell(cell, warning_threshold, where, failures):
-    if cell == "—":
-        return None
-    match = re.fullmatch(r"([+]\d+|0|[-−]\d+)( ⚠)?", cell)
-    if not match:
-        failures.add(f"{where} delta cell has invalid format: {cell!r}")
-        return "invalid"
-    value = int(match.group(1).replace("−", "-"))
-    warned = bool(match.group(2))
-    if warned != (abs(value) >= warning_threshold):
-        failures.add(f"{where} warning marker does not match |delta| threshold")
-    return value
-
-
-def check_bar(cell, score, cells, where, failures):
-    expected = "▰" * (score // 10) + "▱" * (cells - score // 10)
-    if cell != expected:
-        failures.add(f"{where} bar {cell!r} != {expected!r}")
-
-
-def parse_current_score(cell, where, failures):
-    match = re.fullmatch(r"(\d{1,3})(?: ◆)?", cell)
-    if not match:
-        failures.add(f"{where} score cell has invalid format: {cell!r}")
-        return None
-    value = int(match.group(1))
-    if not 0 <= value <= 100:
-        failures.add(f"{where} score is outside 0-100")
-        return None
-    return value
-
-
-def validate_title_meta_summary(doc, score, macro, prior, baseline, dry_run,
-                                contract, failures):
-    nonempty = doc.visible_nonempty()
-    banner = "> [DRY RUN] this report was not committed to archive."
-    has_banner = bool(nonempty and nonempty[0][1] == banner)
-    if dry_run and not has_banner:
-        failures.add("dry-run report must begin with the locked DRY RUN banner")
-    if not dry_run and has_banner:
-        failures.add("production report must not contain the DRY RUN banner")
-    if has_banner:
-        nonempty = nonempty[1:]
-    first_h2_line = min((h[0] for h in doc.headings if h[1] == 2), default=len(doc.lines))
-    prefix = [(i, line) for i, line in nonempty if i < first_h2_line]
-    if len(prefix) != 3:
-        failures.add("title area must contain exactly H1, meta and summary lines")
-        return None, None
-
-    title_match = re.fullmatch(f"# ({DATE_RE}) 市場泡沫風險評估報告", prefix[0][1])
-    if not title_match:
-        failures.add("report title must be `# YYYY-MM-DD 市場泡沫風險評估報告`")
-        return None, None
-    report_date_text = title_match.group(1)
-    report_day = strict_date(report_date_text, "report title date", failures)
-
-    meta_match = re.fullmatch(
-        f"> 報告日期：({DATE_RE})；執行日：({DATE_RE}) Asia/Taipei；"
-        rf"ISO 週次：(\d{{4}}-W\d{{2}})；前次基準：(.+)",
-        prefix[1][1],
-    )
-    if not meta_match:
-        failures.add("meta line format/timezone is invalid")
-    elif report_day:
-        if meta_match.group(1) != report_date_text or meta_match.group(2) != report_date_text:
-            failures.add("meta report/execution dates must match title date")
-        expected_week = f"{report_day.isocalendar().year}-W{report_day.isocalendar().week:02d}"
-        if meta_match.group(3) != expected_week:
-            failures.add(f"meta ISO week {meta_match.group(3)} != {expected_week}")
-        prior_meta = meta_match.group(4)
-        if baseline:
-            if prior_meta != "基準日":
-                failures.add("baseline meta must say `前次基準：基準日`")
-        else:
-            prior_match = re.fullmatch(rf"report-({DATE_RE})（(\d+)天前）", prior_meta)
-            if not prior_match:
-                failures.add("prior meta must identify report date and day interval")
-            else:
-                prior_day = strict_date(prior_match.group(1), "meta prior date", failures)
-                if prior_day:
-                    if prior_day >= report_day:
-                        failures.add("meta prior date must be strictly before report date")
-                    if (report_day - prior_day).days != int(prior_match.group(2)):
-                        failures.add("meta prior day interval is incorrect")
-                if macro and macro.get("prior_run_date") != prior_match.group(1):
-                    failures.add("meta prior date does not match macro prior_run_date")
-                if prior and prior.get("date") and prior["date"] != prior_match.group(1):
-                    failures.add("meta prior date does not match prior score date")
-
-    anchor_union = "|".join(re.escape(item) for item in contract["anchors"])
-    tier_union = "|".join(re.escape(item["name"]) for item in contract["tiers"])
-    trigger_union = "|".join(re.escape(item) for item in contract["trigger_states"])
-    summary_match = re.fullmatch(
-        rf"\*\*總評\*\*：總分 (\d+)【({tier_union})】（Δ (—|0|[+−-]\d+)）；"
-        rf"扳機狀態：({trigger_union})；最貼近錨點：({anchor_union})（(\d+)%）。",
-        prefix[2][1],
-    )
-    if not summary_match:
-        failures.add("summary line does not match the locked format")
-        return report_day, None
-    return report_day, {
-        "total": int(summary_match.group(1)),
-        "tier": summary_match.group(2),
-        "delta": summary_match.group(3),
-        "trigger": summary_match.group(4),
-        "anchor": summary_match.group(5),
-        "similarity": int(summary_match.group(6)),
-    }
-
-
-def validate_headings_and_fence(doc, contract, failures):
-    h1 = [h for h in doc.headings if h[1] == 1]
-    if len(h1) != 1:
-        failures.add(f"report must contain exactly one visible H1; found {len(h1)}")
-    actual_h2 = [h[3] for h in doc.headings if h[1] == 2]
-    if actual_h2 != contract["headings"]:
-        failures.add(f"visible H2 headings/order mismatch: {actual_h2}")
-    for _, level, _, normalized in doc.headings:
-        if level >= 4:
-            failures.add(f"unexpected level-{level} heading: {normalized}")
-
-    allowed_appendix_h3 = [
-        "### Raw data", "### Coverage", "### SEARCH-VERIFIED traceability"
-    ]
-    dimension_h3 = [
-        h for h in doc.headings
-        if h[1] == 3 and h[0] > next(
-            (x[0] for x in doc.headings if x[3] == "## 六維度評分"), len(doc.lines)
-        ) and h[0] < next(
-            (x[0] for x in doc.headings if x[3] == "## 綜合分數"), len(doc.lines)
-        )
-    ]
-    appendix_start = next(
-        (h[0] for h in doc.headings if h[3] == "## 數據附錄"), len(doc.lines)
-    )
-    appendix_end = next(
-        (h[0] for h in doc.headings if h[3] == "## 本次分數存檔"), len(doc.lines)
-    )
-    appendix_h3 = [
-        h for h in doc.headings
-        if h[1] == 3 and appendix_start < h[0] < appendix_end
-    ]
-    if [h[3] for h in appendix_h3] != allowed_appendix_h3:
-        failures.add("appendix H3 headings/order must be Raw data, Coverage, traceability")
-    other_h3 = [
-        h for h in doc.headings
-        if h[1] == 3 and h not in dimension_h3 and h not in appendix_h3
-    ]
-    for heading in other_h3:
-        failures.add(f"unexpected H3 heading: {heading[3]}")
-
-    if len(doc.fences) != 1:
-        failures.add(f"report must contain exactly one code fence; found {len(doc.fences)}")
-        return None
-    fence = doc.fences[0]
-    if fence["char"] != "`" or fence["info"] != "json":
-        failures.add("the only code fence must be labelled exactly `json`")
-    if fence["section"] != "## 本次分數存檔":
-        failures.add("score JSON fence is outside `## 本次分數存檔`")
-    return parse_json_text(fence["content"], "score JSON fence", failures)
-
-
-def validate_section1(doc, score, prior, baseline, contract, failures):
-    rows = find_table(
-        doc.section_lines("## §1 六維度風險條圖"),
-        contract["section1_header"], "§1", failures,
-    )
-    expected_names = [d["name"] for d in contract["dimensions"]] + ["加權總分"]
-    names = [row[0].replace("**", "") for row in rows]
-    if names != expected_names:
-        failures.add(f"§1 row names/order mismatch: {names}")
-        return None
-    warning = contract["calibration"]["dimension_delta_warning_abs"]
-    bar_cells = contract["calibration"]["bar_cells"]
-    total_delta = None
-    for row, dimension in zip(rows[:6], contract["dimensions"]):
-        name, key = dimension["name"], dimension["key"]
-        if row[2].endswith(" ◆") and key != "structural":
-            failures.add("§1 ◆ marker is allowed only on 結構性槓桿")
-        current = parse_current_score(row[2], f"§1 {name}", failures)
-        if current is None:
-            continue
-        if current != score.get(key):
-            failures.add(f"§1 {name} score {current} != score.json {score.get(key)}")
-        check_bar(row[1], current, bar_cells, f"§1 {name}", failures)
-        delta = parse_delta_cell(row[4], warning, f"§1 {name}", failures)
-        if baseline:
-            if row[3] != "—" or delta is not None:
-                failures.add(f"baseline §1 {name} prior/delta must both be —")
-        else:
-            if not re.fullmatch(r"\d{1,3}", row[3]):
-                failures.add(f"§1 {name} previous score has invalid format")
-                continue
-            previous = int(row[3])
-            if previous != prior.get(key):
-                failures.add(f"§1 {name} previous {previous} != prior score {prior.get(key)}")
-            if isinstance(delta, int) and delta != current - previous:
-                failures.add(f"§1 {name} delta {delta} != current - prior")
-
-    if len(rows) != 7:
-        return None
-    total_row = rows[-1]
-    total_match = re.fullmatch(r"\*\*(\d+)【([^】]+)】\*\*", total_row[2])
-    if not total_match:
-        failures.add("§1 total current cell has invalid score/tier format")
-        return None
-    total = int(total_match.group(1))
-    tier = total_match.group(2)
-    if total != score.get("total") or tier != score.get("tier"):
-        failures.add("§1 total/tier does not match score.json")
-    check_bar(total_row[1], total, bar_cells, "§1 加權總分", failures)
-    total_delta = parse_delta_cell(total_row[4], warning, "§1 加權總分", failures)
-    if baseline:
-        if total_row[3] != "—" or total_delta is not None:
-            failures.add("baseline §1 total prior/delta must both be —")
-    else:
-        previous_match = re.fullmatch(r"(?:\*\*)?(\d+)(?:【[^】]+】)?(?:\*\*)?", total_row[3])
-        if not previous_match:
-            failures.add("§1 total previous cell has invalid format")
-        else:
-            previous_total = int(previous_match.group(1))
-            if previous_total != prior.get("total"):
-                failures.add("§1 previous total does not match validated prior total")
-            if isinstance(total_delta, int) and total_delta != total - previous_total:
-                failures.add("§1 total delta != current total - prior total")
-    return total_delta
-
-
-def rounded_similarity(hits, count, step):
-    raw_steps = (Decimal(hits) * Decimal(100)) / Decimal(count) / Decimal(step)
-    return int(raw_steps.quantize(Decimal("1"), rounding=ROUND_HALF_UP) * step)
-
-
-def nested_value(value, path):
-    for key in path:
-        if not isinstance(value, dict) or key not in value:
-            return None
-        value = value[key]
-    return value
-
-
-def trusted_macro_value(macro, path):
-    """Read a rule value only from a block whose status makes it usable."""
-    if not path:
-        return None
-    if path[0] == "series":
-        if len(path) < 3:
-            return None
-        block = macro.get("series", {}).get(path[1], {})
-        if block.get("status") not in ("ok", "derived"):
-            return None
-    else:
-        block = macro.get(path[0], {})
-        if not isinstance(block, dict):
-            return None
-        allowed = (
-            ("ok", "partial") if path[0] == "repo_stress"
-            else ("ok",)
-        )
-        if block.get("status") not in allowed:
-            return None
-    return nested_value(macro, path)
-
-
-def rule_evidence_ids(rule):
-    ids = set(rule.get("source_ids", []))
-    for child in rule.get("rules", []):
-        ids.update(rule_evidence_ids(child))
-    return ids
-
-
-def evaluate_anchor_rule(rule, score, macro, prior, baseline, contract):
-    """Evaluate machine-known feature truth; None means evidence judgment."""
-    kind = rule.get("type")
-    if kind == "evidence":
-        return None
-    if kind == "score_between":
-        value = score.get(rule["key"])
-        return rule["min"] <= value <= rule["max"]
-    if kind == "score_lt":
-        return score.get(rule["key"]) < rule["value"]
-    if kind == "score_gte":
-        return score.get(rule["key"]) >= rule["value"]
-    if kind == "score_delta_gte":
-        if baseline or prior is None:
-            return None
-        return score.get(rule["key"]) - prior.get(rule["key"]) >= rule["value"]
-    if kind == "trigger_eq":
-        return score.get("trigger_state") == rule["value"]
-    if kind == "trigger_gte":
-        ranks = {state: i for i, state in enumerate(contract["trigger_states"])}
-        return ranks.get(score.get("trigger_state"), -1) >= ranks[rule["value"]]
-    if kind == "monetary_side_eq":
-        return score.get("monetary_side") == rule["value"]
-    if kind == "macro_equals":
-        value = trusted_macro_value(macro, rule["path"])
-        return None if value is None else value == rule["value"]
-    if kind == "macro_compare":
-        value = trusted_macro_value(macro, rule["path"])
-        if type(value) not in (int, float) or not math.isfinite(value):
-            return None
-        target = rule["value"]
-        return {
-            "lt": value < target, "le": value <= target,
-            "gt": value > target, "ge": value >= target,
-            "eq": value == target,
-        }[rule["op"]]
-    if kind in ("all", "any"):
-        results = [
-            evaluate_anchor_rule(child, score, macro, prior, baseline, contract)
-            for child in rule["rules"]
-        ]
-        if kind == "all":
-            if False in results:
-                return False
-            return True if all(value is True for value in results) else None
-        if True in results:
-            return True
-        return False if all(value is False for value in results) else None
-    if kind == "high_retreat":
-        if baseline or prior is None:
-            return False
-        prior_dev = prior.get("sp500_dev200_pct")
-        current_dev = trusted_macro_value(macro, ["sp500_trend", "dev200_pct"])
-        retreat = (
-            type(prior_dev) in (int, float)
-            and type(current_dev) in (int, float)
-            and prior_dev > contract["calibration"]["sp500_high_deviation_pct"]
-            and current_dev < prior_dev
-        )
-        chg = trusted_macro_value(macro, ["sp500_trend", "chg_pct"])
-        return retreat or (type(chg) in (int, float) and chg <= -5)
-    return None
-
-
-def validate_section2_and_history(doc, summary, score, macro, prior, baseline,
-                                  evidence, contract, failures):
-    rows = find_table(
-        doc.section_lines("## §2 歷史錨點相似度"),
-        contract["section2_header"], "§2", failures,
-    )
-    names = [row[0] for row in rows]
-    if names != contract["anchors"]:
-        failures.add(f"§2 anchor names/order mismatch: {names}")
-        return
-    percentages = []
-    marked = []
-    step = contract["calibration"]["historical_similarity_step_pct"]
-    for index, row in enumerate(rows):
-        match = re.fullmatch(r"(\d{1,3})%", row[1])
-        if not match:
-            failures.add(f"§2 {row[0]} similarity format is invalid")
-            percentages.append(None)
-            continue
-        percentage = int(match.group(1))
-        percentages.append(percentage)
-        if not 0 <= percentage <= 100 or percentage % step:
-            failures.add(f"§2 {row[0]} similarity must be 0-100 on {step}% steps")
-        check_bar(
-            row[2], percentage, contract["calibration"]["bar_cells"],
-            f"§2 {row[0]}", failures,
-        )
-        if row[3] == "◀ 最貼近":
-            marked.append(index)
-        elif row[3] != "":
-            failures.add(f"§2 {row[0]} marker is invalid")
-    if len(marked) != 1:
-        failures.add("§2 must mark exactly one closest anchor")
-    elif all(value is not None for value in percentages):
-        expected_index = max(range(len(percentages)), key=lambda i: percentages[i])
-        if marked[0] != expected_index:
-            failures.add("§2 closest marker is not on the highest/first-tie anchor")
-        if summary and (
-            summary["anchor"] != contract["anchors"][marked[0]]
-            or summary["similarity"] != percentages[marked[0]]
-        ):
-            failures.add("summary closest anchor does not match §2")
-
-    history = [line.strip() for _, line in doc.section_lines("## 歷史泡沫週期對比") if line.strip()]
-    if history.count("相似度計算：checklist v2") != 1:
-        failures.add("historical section must contain exact `相似度計算：checklist v2`")
-    audit_line_re = re.compile(
-        r"^- ([A-Za-z0-9./]+)｜(命中|未命中|無資料)｜"
-        r"source_ids=([^｜]+)｜(.+)$"
-    )
-    parsed_features = {}
-    parsed_feature_order = []
-    for line in history:
-        match = audit_line_re.fullmatch(line)
-        if match:
-            parsed_features.setdefault(match.group(1), []).append(match.groups()[1:])
-            parsed_feature_order.append(match.group(1))
-    expected_feature_ids = {
-        feature["id"] for anchor in contract["anchors"]
-        for feature in contract["anchor_features"][anchor]
-    }
-    unknown_feature_ids = set(parsed_features) - expected_feature_ids
-    if unknown_feature_ids:
-        failures.add(f"historical audit has unknown feature IDs: {sorted(unknown_feature_ids)}")
-    expected_feature_order = [
-        feature["id"] for anchor in contract["anchors"]
-        for feature in contract["anchor_features"][anchor]
-    ]
-    if parsed_feature_order != expected_feature_order:
-        failures.add("historical feature audit lines are missing/reordered/duplicated")
-    feature_headings = [
-        line for line in history
-        if re.fullmatch(r"\*\*.+ feature audit\*\*", line)
-    ]
-    expected_feature_headings = [
-        f"**{anchor} feature audit**" for anchor in contract["anchors"]
-    ]
-    if feature_headings != expected_feature_headings:
-        failures.add("historical feature-audit headings are missing or out of order")
-
-    summary_values = {}
-    machine_retreat = False
-    for anchor in contract["anchors"]:
-        pattern = re.compile(
-            rf"^- {re.escape(anchor)}：命中 (\d+)/(\d+) = (\d+)%$"
-        )
-        matches = [pattern.fullmatch(line) for line in history]
-        matches = [match for match in matches if match]
-        if len(matches) != 1:
-            failures.add(f"historical section needs one exact audit summary for {anchor}")
-            continue
-        declared_hits, count, percentage = map(int, matches[0].groups())
-        expected_count = contract["anchor_feature_counts"][anchor]
-        if count != expected_count or not 0 <= declared_hits <= count:
-            failures.add(f"historical audit count for {anchor} is invalid")
-            continue
-        actual_hits = 0
-        for feature in contract["anchor_features"][anchor]:
-            feature_id = feature["id"]
-            entries = parsed_features.get(feature_id, [])
-            if len(entries) != 1:
-                failures.add(f"historical feature {feature_id} needs one exact audit line")
-                continue
-            status, source_text, _detail = entries[0]
-            source_ids = [] if source_text == "—" else source_text.split(",")
-            if len(source_ids) != len(set(source_ids)):
-                failures.add(f"historical feature {feature_id} repeats source IDs")
-            allowed_sources = rule_evidence_ids(feature["rule"])
-            if not set(source_ids) <= allowed_sources:
-                failures.add(f"historical feature {feature_id} cites disallowed source IDs")
-            known = evaluate_anchor_rule(
-                feature["rule"], score, macro, prior, baseline, contract
-            )
-            if known is True and status != "命中":
-                failures.add(f"historical feature {feature_id} contradicts machine truth")
-            elif known is False and status != "未命中":
-                failures.add(f"historical feature {feature_id} contradicts machine truth")
-            elif known is None:
-                positive_allowed = {
-                    source_id for source_id in allowed_sources
-                    if evidence["success"].get(source_id)
-                }
-                available_allowed = {
-                    source_id for source_id in allowed_sources
-                    if evidence["available"].get(source_id)
-                }
-                if status == "命中" and (
-                        not source_ids or not set(source_ids) <= positive_allowed):
-                    failures.add(
-                        f"historical feature {feature_id} hit lacks successful evidence"
-                    )
-                if status == "未命中" and (
-                        not source_ids or not set(source_ids) <= available_allowed):
-                    failures.add(
-                        f"historical feature {feature_id} miss lacks completed evidence"
-                    )
-                if status == "無資料" and available_allowed:
-                    failures.add(
-                        f"historical feature {feature_id} says 無資料 despite evidence"
-                    )
-                if status == "無資料" and source_ids:
-                    failures.add(f"historical feature {feature_id} 無資料 must cite —")
-                if not available_allowed and status != "無資料":
-                    failures.add(
-                        f"historical feature {feature_id} has no completed evidence and must be 無資料"
-                    )
-            if status == "命中":
-                actual_hits += 1
-            if feature_id == "2000.4":
-                machine_retreat = known is True
-        if declared_hits != actual_hits:
-            failures.add(
-                f"historical audit {anchor} declares {declared_hits} hits; feature lines yield {actual_hits}"
-            )
-        expected_percentage = rounded_similarity(actual_hits, count, step)
-        if percentage != expected_percentage:
-            failures.add(f"historical audit arithmetic for {anchor} is invalid")
-        summary_values[anchor] = percentage
-    if len(summary_values) == len(rows):
-        for row, percentage in zip(rows, percentages):
-            if percentage is not None and summary_values.get(row[0]) != percentage:
-                failures.add(f"historical audit {row[0]} does not match §2")
-
-    audit_label = contract["historical_audit_labels"][0]
-    audit_matches = [
-        re.fullmatch(rf"{re.escape(audit_label)}：(是|否)", line) for line in history
-    ]
-    audit_matches = [match for match in audit_matches if match]
-    if len(audit_matches) != 1:
-        failures.add(f"historical section needs exact `{audit_label}：是|否`")
-    else:
-        expected = "是" if machine_retreat else "否"
-        if audit_matches[0].group(1) != expected:
-            failures.add(f"{audit_label} does not match persisted/macro inputs")
-
-
-def triangle_fallback_level(spec, evidence, failures):
-    """Read a search fallback spot from one auditable traceability marker."""
-    source_id = spec["source_id"]
-    if evidence["coverage_tokens"].get(source_id) != "✓ SEARCH-VERIFIED":
-        failures.add(f"triangle fallback {source_id} requires SEARCH-VERIFIED Coverage")
-        return None
-    matches = []
-    pattern = re.compile(
-        r"^\[triangle_fallback\]\s+" + re.escape(spec["component"])
-        + r"\s+fallback_value=([+−-]?\d+(?:\.\d+)?)$"
-    )
-    for row in evidence["traces_by_id"].get(source_id, []):
-        match = pattern.fullmatch(row[1])
-        if match and contains_valid_http_url(row[3]):
-            matches.append(match)
-    if len(matches) != 1:
-        failures.add(
-            f"triangle fallback {source_id} needs one exact [triangle_fallback] trace"
-        )
-        return None
-    try:
-        return float(matches[0].group(1).replace("−", "-"))
-    except ValueError:
-        failures.add(f"triangle fallback {source_id} value is invalid")
-        return None
-
-
-def validate_triangle(doc, score, summary, macro, prior, baseline, evidence,
-                      contract, failures):
-    section = doc.section_lines("## §3 三角訊號")
-    rows = find_table(section, contract["section3_header"], "§3", failures)
-    if [row[0] for row in rows] != contract["triangle_indicators"]:
-        failures.add(f"§3 indicator rows/order mismatch: {[row[0] for row in rows]}")
-        return None
-    regime, directions = expected_regime(macro, baseline, contract)
-    series = macro.get("series", {})
-    sp500 = macro.get("sp500_trend", {})
-    decomposition = macro.get("decomposition", {})
-    expected_levels = [
-        trusted_macro_value(macro, ["sp500_trend", "latest"]),
-        trusted_macro_value(macro, ["series", "DCOILWTICO", "latest"]),
-        trusted_macro_value(macro, ["series", "DGS10", "latest"]),
-    ]
-    display_levels = list(expected_levels)
-    for index, spec in enumerate(contract["triangle_fallbacks"]):
-        if not finite_number(display_levels[index]):
-            display_levels[index] = triangle_fallback_level(
-                spec, evidence, failures
-            )
-    expected_priors = [
-        trusted_macro_value(macro, ["sp500_trend", "prior_spot"]),
-        trusted_macro_value(macro, ["series", "DCOILWTICO", "prior"]),
-        trusted_macro_value(macro, ["series", "DGS10", "prior"]),
-    ]
-    keys = ["sp500", "wti", "dgs10"]
-    no_new = [
-        bool(sp500.get("no_new_obs")),
-        bool(series.get("DCOILWTICO", {}).get("no_new_obs")),
-        bool(series.get("DGS10", {}).get("no_new_obs")),
-    ]
-    changes = [
-        trusted_macro_value(macro, ["sp500_trend", "chg_pct"]),
-        trusted_macro_value(macro, ["series", "DCOILWTICO", "chg_pct"]),
-        trusted_decomposition_leg(macro, "d_dgs10_bps"),
-    ]
-    for index, row in enumerate(rows):
-        if row[1] in ("", "—"):
-            failures.add(f"§3 {row[0]} current value is empty")
-        expected_level = display_levels[index]
-        if type(expected_level) in (int, float):
-            if not displayed_matches(row[1], expected_level):
-                failures.add(f"§3 {row[0]} level does not match macro/fallback evidence")
-        elif row[1] != "不可用":
-            failures.add(f"§3 {row[0]} unavailable level must use exact `不可用`")
-        if baseline:
-            if row[2] != "基準日（無前次可比）":
-                failures.add(f"baseline §3 {row[0]} comparison must use locked baseline text")
-            continue
-        expected_direction = directions[keys[index]]
-        if not direction_cell_matches(row[2], expected_direction, no_new[index]):
-            failures.add(f"§3 {row[0]} direction does not match macro threshold")
-        if expected_direction is not None and type(changes[index]) in (int, float):
-            unit = "%" if index < 2 else "bps"
-            match = re.search(
-                rf"([+−-]?\d[\d,]*(?:\.\d+)?)\s*{re.escape(unit)}", row[2]
-            )
-            if not match or not displayed_matches(match.group(1), changes[index]):
-                failures.add(f"§3 {row[0]} displayed change does not match macro JSON")
-        expected_prior = expected_priors[index]
-        if type(expected_prior) in (int, float):
-            prior_match = re.search(r"前次\s*(.+?)(?:）|$)", row[2])
-            if not prior_match or not displayed_matches(
-                    prior_match.group(1), expected_prior):
-                failures.add(f"§3 {row[0]} previous level does not match macro JSON")
-
-    visible = [line.strip() for _, line in section if line.strip()]
-    label_positions = []
-    label_lines = {}
-    label_warnings = {}
-    for label in contract["triangle_labels"]:
-        pattern = re.compile(
-            rf"^(⚠ )?\*\*{re.escape(label)}\*\*：(.*)$"
-        )
-        matches = [(i, pattern.fullmatch(line)) for i, line in enumerate(visible)]
-        matches = [(i, match) for i, match in matches if match]
-        if len(matches) != 1:
-            failures.add(f"§3 needs exactly one visible `{label}` label")
-            continue
-        label_positions.append(matches[0][0])
-        label_warnings[label] = bool(matches[0][1].group(1))
-        label_lines[label] = matches[0][1].group(2).strip()
-    if len(label_positions) == len(contract["triangle_labels"]) and label_positions != sorted(label_positions):
-        failures.add("§3 interpretation labels are out of order")
-
-    bullet_names = []
-    bullet_text = {}
-    bullet_positions = []
-    for position, line in enumerate(visible):
-        match = re.fullmatch(r"- (股市|WTI 原油|10Y 殖利率)：(.+)", line)
-        if match:
-            bullet_names.append(match.group(1))
-            bullet_text[match.group(1)] = match.group(2)
-            bullet_positions.append(position)
-    if bullet_names != ["股市", "WTI 原油", "10Y 殖利率"]:
-        failures.add("§3 三者狀態 must contain the three locked indicator bullets in order")
-    else:
-        state_position = next((i for i, line in enumerate(visible)
-                               if re.match(r"^(?:⚠ )?\*\*三者狀態\*\*：", line)), -1)
-        transition_position = next((i for i, line in enumerate(visible)
-                                    if re.match(r"^(?:⚠ )?\*\*格局轉變\*\*：", line)), -1)
-        if not all(state_position < pos < transition_position for pos in bullet_positions):
-            failures.add("§3 indicator bullets must immediately belong to 三者狀態")
-        for bullet_index, (label, key) in enumerate(zip(
-            ("股市", "WTI 原油", "10Y 殖利率"),
-            ("sp500", "wti", "dgs10"),
-        )):
-            text = bullet_text[label]
-            expected_display = display_levels[bullet_index]
-            if finite_number(expected_display):
-                if not displayed_matches(text, expected_display):
-                    failures.add(
-                        f"§3 {label} bullet lacks the macro/fallback current value"
-                    )
-            elif "水位不可用" not in text:
-                failures.add(f"§3 {label} bullet must disclose 水位不可用")
-            if baseline:
-                if "基準日" not in text:
-                    failures.add(f"baseline §3 {label} bullet must say 基準日")
-            else:
-                required_token = {
-                    "up": "▲", "down": "▼", "flat": "持平", None: "方向不可用",
-                }[directions[key]]
-                if required_token not in text:
-                    failures.add(f"§3 {label} bullet direction conflicts with its table row")
-                if type(changes[bullet_index]) in (int, float) and not displayed_matches(
-                        text[text.find(required_token) + len(required_token):],
-                        changes[bullet_index]):
-                    failures.add(f"§3 {label} bullet lacks the macro change amplitude")
-
-    state_line = label_lines.get("三者狀態", "")
-    regime_term = {
-        "穩定共存": "穩定共存", "同向偏高": "同向偏高",
-        "分歧": "分歧", "基準日": "基準日", "不可判": "不可判",
-    }[regime]
-    if regime_term not in state_line:
-        failures.add("§3 三者狀態 does not match macro-derived regime")
-    if score.get("regime") != regime:
-        failures.add(f"score.json regime {score.get('regime')!r} != derived {regime!r}")
-
-    transition_line = label_lines.get("格局轉變", "")
-    if baseline or prior.get("regime") is None:
-        if "前次無格局紀錄" not in transition_line:
-            failures.add("§3 格局轉變 must disclose that prior regime is unavailable")
-    else:
-        visible_current = regime
-        if prior.get("regime") not in transition_line or visible_current not in transition_line:
-            failures.add("§3 格局轉變 does not contain prior and current regimes")
-
-    decomposition_line = label_lines.get("10Y 成因拆解", "")
-    driver = decomposition.get("driver")
-    decomposition_status = decomposition.get("status")
-    freshness = decomposition.get("freshness")
-    leg_specs = [
-        ("ΔDGS10 名目殖利率週變動", trusted_decomposition_leg(macro, "d_dgs10_bps")),
-        ("ΔDFII10 實質殖利率週變動", trusted_decomposition_leg(macro, "d_dfii10_bps")),
-        ("ΔT10YIE 損益平衡通膨週變動", trusted_decomposition_leg(macro, "d_t10yie_bps")),
-    ]
-    decomposition_bullets = {}
-    for line in visible:
-        for name, _expected in leg_specs:
-            match = re.fullmatch(rf"- {re.escape(name)}：(.+)", line)
-            if match:
-                decomposition_bullets.setdefault(name, []).append(match.group(1))
-    for name, expected in leg_specs:
-        values = decomposition_bullets.get(name, [])
-        if len(values) != 1:
-            failures.add(f"§3 decomposition needs one `{name}` bullet")
-            continue
-        value_text = values[0]
-        if baseline:
-            if value_text != "基準日":
-                failures.add(f"baseline {name} must say 基準日")
-        elif type(expected) in (int, float):
-            if "bps" not in value_text or not displayed_matches(value_text, expected):
-                failures.add(f"§3 {name} does not match macro decomposition")
-        elif value_text != "不可用（無日序資料）":
-            failures.add(f"§3 {name} missing unavailable-history wording")
-    if baseline:
-        if driver != "baseline" or "基準日" not in decomposition_line:
-            failures.add("baseline 10Y decomposition is not labelled as baseline")
-    elif decomposition_status == "unavailable_no_daily_history":
-        if decomposition_line != "本週 Δ 分解不可用——無日序資料":
-            failures.add("unavailable decomposition needs the locked no-history wording")
-    elif driver == "none":
-        if "無變動" not in decomposition_line:
-            failures.add("zero-delta decomposition must say 無變動")
-        if ("無新觀測" in decomposition_line) != (freshness == "all_stale"):
-            failures.add("decomposition no-new-observation wording conflicts with freshness")
-    elif driver == "unknown" and "不可判" not in decomposition_line:
-        failures.add("unknown decomposition driver must say 不可判")
-    elif driver in ("real-rate", "breakeven", "mixed") and driver not in decomposition_line:
-        failures.add("10Y decomposition label does not match macro driver")
-    freshness_lines = [line for line in visible if line.startswith("- 觀測新鮮度：")]
-    if freshness == "partial_stale":
-        expected_stale = ",".join(decomposition.get("stale_series", []))
-        exact = f"- 觀測新鮮度：部分未更新（stale_series={expected_stale}）"
-        if freshness_lines != [exact]:
-            failures.add("partial-stale decomposition must list exact stale_series")
-    elif freshness_lines:
-        failures.add("觀測新鮮度 bullet is only allowed for partial_stale")
-
-    trigger_chain = label_lines.get("扳機鏈", "")
-    if not trigger_chain or "A 通膨鏈" not in trigger_chain or "B 槓桿鏈" not in trigger_chain:
-        failures.add("§3 扳機鏈 must contain nonempty A/B chain assessments")
-    for requirement in contract["triangle_chain_inputs"]:
-        source_id = requirement["source_id"]
-        series_id = requirement["series"]
-        block = series.get(series_id, {})
-        prefix = rf"\[{re.escape(source_id)}\]\s+{re.escape(series_id)}\s+"
-        if block.get("status") in ("ok", "derived"):
-            value_field = requirement["value_field"]
-            delta_field = requirement["delta_field"]
-            pattern = prefix + re.escape(value_field) + (
-                r"=([+−-]?\d+(?:\.\d+)?)\s+"
-                + (re.escape(delta_field)
-                   + r"=([+−-]?\d+(?:\.\d+)?|基準日|不可用)\s+"
-                   if delta_field else "")
-                + rf"data_date=({DATE_RE})"
-            )
-            matches = list(re.finditer(pattern, trigger_chain))
-            if len(matches) != 1:
-                failures.add(
-                    f"§3 A-chain needs one exact marker for {source_id}/{series_id}"
-                )
-                continue
-            match = matches[0]
-            if not displayed_matches(match.group(1), block.get(value_field)):
-                failures.add(
-                    f"§3 A-chain {series_id}.{value_field} != macro JSON"
-                )
-            date_group = 3 if delta_field else 2
-            if match.group(date_group) != block.get("latest_date"):
-                failures.add(f"§3 A-chain {series_id} data_date != macro JSON")
-            if delta_field:
-                rendered_delta = match.group(2)
-                expected_delta = block.get(delta_field)
-                if finite_number(expected_delta):
-                    if not displayed_matches(rendered_delta, expected_delta):
-                        failures.add(
-                            f"§3 A-chain {series_id}.{delta_field} != macro JSON"
-                        )
-                else:
-                    expected_text = "基準日" if baseline else "不可用"
-                    if rendered_delta != expected_text:
-                        failures.add(
-                            f"§3 A-chain {series_id}.{delta_field} needs {expected_text}"
-                        )
-        else:
-            token = evidence["coverage_tokens"].get(source_id)
-            pattern = prefix + re.escape(token or "") + r"\s+不納入判讀"
-            if len(re.findall(pattern, trigger_chain)) != 1:
-                failures.add(
-                    f"§3 A-chain missing input {source_id}/{series_id} "
-                    "lacks exact Coverage disclosure"
-                )
-
-    reason_line = label_lines.get("扳機理由", "")
-    visible_reasons = [] if reason_line == "none" else reason_line.split("、")
-    if visible_reasons != score.get("trigger_reasons"):
-        failures.add("§3 扳機理由 does not match score.json trigger_reasons")
-
-    conclusion = label_lines.get("結論", "")
-    trigger_match = re.search(
-        "扳機狀態：(" + "|".join(map(re.escape, contract["trigger_states"])) + ")",
-        conclusion,
-    )
-    trigger = trigger_match.group(1) if trigger_match else None
-    if trigger is None:
-        failures.add("§3 conclusion lacks a valid trigger state")
-    else:
-        if not conclusion.startswith(f"扳機狀態：{trigger}"):
-            failures.add("§3 conclusion must begin with its trigger-state label")
-        if score.get("trigger_state") != trigger:
-            failures.add("score.json trigger_state != §3 conclusion")
-        if summary and summary["trigger"] != trigger:
-            failures.add("summary trigger state != §3 conclusion")
-    expected_warning = trigger == "已擊發" or regime == "同向偏高"
-    for label, warned in label_warnings.items():
-        if label != "結論" and warned:
-            failures.add(f"§3 ⚠ prefix is forbidden on {label}")
-    if label_warnings.get("結論", False) != expected_warning:
-        failures.add("§3 結論 ⚠ prefix does not match trigger/regime rule")
-    return trigger
-
-
-def discloses_value(text, value):
-    """True when a macro field's value is visible in report prose."""
-    if isinstance(value, str):
-        return value in text
-    return displayed_contains(text, value)
-
-
-def validate_dimensions(doc, score, prior, baseline, report_day, evidence,
-                        macro, contract, failures):
-    start = next((h[0] for h in doc.headings if h[3] == "## 六維度評分"), None)
-    end = next((h[0] for h in doc.headings if h[3] == "## 綜合分數"), None)
-    if start is None or end is None:
-        return None
-    h3s = [h for h in doc.headings if h[1] == 3 and start < h[0] < end]
-    if len(h3s) != 6:
-        failures.add(f"六維度評分 must contain exactly six H3 subsections; found {len(h3s)}")
-        return None
-    monetary_side = None
-    for index, (heading, dimension) in enumerate(zip(h3s, contract["dimensions"]), 1):
-        expected_delta = "—" if baseline else str(score[dimension["key"]] - prior[dimension["key"]])
-        if expected_delta not in ("—", "0") and int(expected_delta) > 0:
-            expected_delta = "+" + expected_delta
-        pattern = re.compile(
-            rf"^### {index}\. {re.escape(dimension['name'])} — (\d+)"
-            rf"（weight (\d+)%，Δ (—|0|[+−-]\d+)）$"
-        )
-        match = pattern.fullmatch(heading[3])
-        if not match:
-            failures.add(f"dimension H3 format mismatch: {heading[3]}")
-            continue
-        if int(match.group(1)) != score[dimension["key"]]:
-            failures.add(f"dimension H3 score mismatch for {dimension['name']}")
-        if int(match.group(2)) != dimension["weight"]:
-            failures.add(f"dimension H3 weight mismatch for {dimension['name']}")
-        if match.group(3).replace("−", "-") != expected_delta:
-            failures.add(f"dimension H3 delta mismatch for {dimension['name']}")
-        block_end = h3s[index][0] if index < len(h3s) else end
-        block = [
-            line.strip() for line_no, line in doc.visible
-            if heading[0] < line_no < block_end and line.strip()
-        ]
-        bullets = [line for line in block if line.startswith("- ")]
-        if not bullets:
-            failures.add(f"dimension {dimension['name']} has no scoring-input bullet")
-        for bullet in bullets:
-            source_match = re.search(
-                r"(?:^|[；，,（(\s])source_ids=([a-z][a-z0-9_.]*(?:,[a-z][a-z0-9_.]*)*)",
-                bullet,
-            )
-            if not source_match:
-                failures.add(
-                    f"dimension {dimension['name']} bullet lacks exact source_ids linkage"
-                )
-                source_ids = []
-            else:
-                source_ids = source_match.group(1).split(",")
-                if len(source_ids) != len(set(source_ids)) or any(
-                        source_id not in evidence["coverage_tokens"]
-                        for source_id in source_ids):
-                    failures.add(
-                        f"dimension {dimension['name']} bullet has invalid source_ids"
-                    )
-            if "✗ NOT DISCLOSED" in bullet or "⛔ FETCH FAILED" in bullet:
-                if "不納入計分" not in bullet:
-                    failures.add(
-                        f"dimension {dimension['name']} missing-data bullet must say 不納入計分"
-                    )
-                for source_id in source_ids:
-                    expected_token = evidence["coverage_tokens"].get(source_id)
-                    if expected_token not in ("✗ NOT DISCLOSED", "⛔ FETCH FAILED") \
-                            or expected_token not in bullet:
-                        failures.add(
-                            f"dimension {dimension['name']} missing bullet status/source mismatch"
-                        )
-                continue
-            if not re.search(r"\d", bullet):
-                failures.add(f"dimension {dimension['name']} has a non-concrete bullet")
-            dates = re.findall(DATE_RE, bullet)
-            if not dates:
-                failures.add(f"dimension {dimension['name']} bullet lacks a data date")
-            else:
-                bullet_day = strict_date(
-                    dates[-1], f"dimension {dimension['name']} bullet date", failures
-                )
-                if bullet_day and report_day and bullet_day > report_day:
-                    failures.add(f"dimension {dimension['name']} bullet date is in the future")
-            if not (
-                contains_valid_http_url(bullet)
-                or re.search(r"\b[A-Z][A-Z0-9.^_-]{1,}\b", bullet)
-            ):
-                failures.add(f"dimension {dimension['name']} bullet lacks a source ID/URL")
-            for source_id in source_ids:
-                candidates = [
-                    (extract_number(row[2]), row[4])
-                    for row in evidence["raw_by_id"].get(source_id, [])
-                ] + [
-                    (extract_trace_evidence_number(row[1]), row[4])
-                    for row in evidence["traces_by_id"].get(source_id, [])
-                ]
-                linked = False
-                for value, data_date in candidates:
-                    if (value is not None and data_date in bullet
-                            and displayed_contains(bullet, value)):
-                        linked = True
-                        break
-                if not linked:
-                    failures.add(
-                        f"dimension {dimension['name']} bullet value/date is not linked "
-                        f"to appendix evidence for {source_id}"
-                    )
-        for disclosure in contract["macro_window_disclosures"]:
-            if disclosure["dimension_key"] != dimension["key"]:
-                continue
-            macro_block = macro.get(disclosure["block"])
-            if (not isinstance(macro_block, dict)
-                    or macro_block.get("status") != "ok"):
-                continue
-            source_id = disclosure["source_id"]
-            matching = [
-                bullet for bullet in bullets
-                if re.search(
-                    rf"(?:^|[;；，,（(\s])source_ids=(?:"
-                    rf"[a-z][a-z0-9_.]*,)*{re.escape(source_id)}"
-                    rf"(?:,[a-z][a-z0-9_.]*)*(?=$|[^a-z0-9_.])",
-                    bullet,
-                )
-            ]
-            if len(matching) != 1:
-                failures.add(
-                    f"dimension {dimension['name']} needs one bullet disclosing "
-                    f"the {disclosure['block']} window for {source_id}"
-                )
-                continue
-            # The window is a trailing shared pair, not the report's usual
-            # per-run delta, so it is unreadable without every field.
-            undisclosed = [
-                field for field in disclosure["fields"]
-                if not discloses_value(matching[0], macro_block.get(field))
-            ]
-            if undisclosed:
-                failures.add(
-                    f"dimension {dimension['name']} bullet for {source_id} does not "
-                    f"disclose {disclosure['block']} fields: {undisclosed}"
-                )
-        if dimension["key"] in contract["dimension_required_inputs"]:
-            requirements = contract["dimension_required_inputs"][dimension["key"]]
-            for requirement in requirements:
-                source_id = requirement["source_id"]
-                indicator = requirement["indicator"]
-                matching = [
-                    bullet for bullet in bullets
-                    if re.search(
-                        rf"(?:^|[;；，,（(\s])source_ids=(?:"
-                        rf"[a-z][a-z0-9_.]*,)*{re.escape(source_id)}"
-                        rf"(?:,[a-z][a-z0-9_.]*)*(?=$|[^a-z0-9_.])",
-                        bullet,
-                    ) and (indicator is None or indicator in bullet)
-                ]
-                macro_block = (
-                    macro.get("series", {}).get(indicator, {})
-                    if indicator in macro.get("series", {}) else None
-                ) if indicator is not None else None
-                component_ok = (
-                    isinstance(macro_block, dict)
-                    and macro_block.get("status") in ("ok", "derived")
-                )
-                source_ok = evidence["available"].get(source_id)
-                # A failed API component can still be satisfied by an
-                # auditable SEARCH-VERIFIED fallback for the same source.
-                should_have_value = bool(component_ok or source_ok)
-                if len(matching) != 1:
-                    failures.add(
-                        f"dimension {dimension['name']} needs one required input bullet "
-                        f"for {source_id}/{indicator or 'source'}"
-                    )
-                    continue
-                required_bullet = matching[0]
-                if should_have_value:
-                    candidates = [
-                        (extract_number(row[2]), row[4])
-                        for row in evidence["raw_by_id"].get(source_id, [])
-                        if (indicator is None
-                            or mentions_identifier(row[1], indicator)
-                            or mentions_identifier(row[3], indicator))
-                    ] + [
-                        (extract_trace_evidence_number(row[1]), row[4])
-                        for row in evidence["traces_by_id"].get(source_id, [])
-                        if (indicator is None
-                            or mentions_identifier(row[1], indicator)
-                            or mentions_identifier(row[2], indicator))
-                    ]
-                    if not any(
-                            data_date in required_bullet
-                            and value is not None
-                            and displayed_contains(required_bullet, value)
-                            for value, data_date in candidates):
-                        failures.add(
-                            f"dimension {dimension['name']} required input {source_id}/"
-                            f"{indicator or 'source'} lacks its appendix value/date"
-                        )
-                else:
-                    token = evidence["coverage_tokens"].get(source_id)
-                    if (token is None or token not in required_bullet
-                            or "不納入計分" not in required_bullet):
-                        failures.add(
-                            f"dimension {dimension['name']} missing required input "
-                            f"{source_id}/{indicator or 'source'} lacks status disclosure"
-                        )
-        conclusions = [line for line in block if line.startswith("**結論**：")]
-        if len(conclusions) != 1:
-            failures.add(f"dimension {dimension['name']} needs exactly one conclusion")
-        elif block[-1] != conclusions[0]:
-            failures.add(f"dimension {dimension['name']} conclusion must be its final line")
-        if dimension["key"] == "monetary" and len(conclusions) == 1:
-            side_pattern = "|".join(map(re.escape, contract["monetary_sides"]))
-            side_match = re.fullmatch(
-                rf"\*\*結論\*\*：({side_pattern})；.+", conclusions[0]
-            )
-            hits = [side_match.group(1)] if side_match else []
-            if len(hits) != 1:
-                failures.add("D5 conclusion must contain exactly one monetary side")
-            else:
-                monetary_side = hits[0]
-                if score.get("monetary_side") != monetary_side:
-                    failures.add("score.json monetary_side != D5 conclusion")
-    return monetary_side
-
-
-def validate_weighted_section(doc, score, contract, failures):
-    section = doc.section_lines("## 綜合分數")
-    rows = find_table(section, contract["weighted_score_header"], "綜合分數", failures)
-    if [row[0] for row in rows] != [d["name"] for d in contract["dimensions"]]:
-        failures.add("weighted-score row names/order mismatch")
-    for row, dimension in zip(rows, contract["dimensions"]):
-        if row[1] != f"{dimension['weight']}%":
-            failures.add(f"weighted-score weight mismatch for {dimension['name']}")
-        if row[2] != str(score[dimension["key"]]):
-            failures.add(f"weighted-score score mismatch for {dimension['name']}")
-        expected = Decimal(score[dimension["key"]] * dimension["weight"]) / Decimal(100)
-        if not re.fullmatch(r"\d+\.\d{2}", row[3]):
-            failures.add(f"weighted component format invalid for {dimension['name']}")
-        elif Decimal(row[3]) != expected.quantize(Decimal("0.01")):
-            failures.add(f"weighted component mismatch for {dimension['name']}")
-    _, raw_total = weighted_total(score, contract)
-    summary_line = f"加權總分：{raw_total:.2f} → {score['total']}【{score['tier']}】"
-    visible = [line.strip() for _, line in section if line.strip()]
-    if visible.count(summary_line) != 1:
-        failures.add(f"weighted section needs exact `{summary_line}`")
-
-    distance = contract["calibration"]["tier_boundary_distance"]
-    boundaries = [item["min"] for item in contract["tiers"]][1:]
-    needs_boundary = any(boundary - distance <= score["total"] <= boundary + distance - 1
-                         for boundary in boundaries)
-    boundary_lines = [line for line in visible if line.startswith("邊界帶：")]
-    if needs_boundary and len(boundary_lines) != 1:
-        failures.add("weighted total near a tier boundary requires one 邊界帶 note")
-    if not needs_boundary and boundary_lines:
-        failures.add("邊界帶 note is present outside a contract boundary band")
-
-
-def active_machine_trigger_reasons(score, macro, baseline, monetary_side, contract):
-    if baseline:
-        return set()
-    active = set()
-    hy_delta = trusted_macro_value(
-        macro, ["series", "BAMLH0A0HYM2", "delta_bps"]
-    )
-    if (type(hy_delta) in (int, float)
-            and hy_delta >= contract["calibration"]["hy_oas_fired_delta_bps"]):
-        active.add("hy_oas_fired")
-    streak = score.get("hy_oas_widening_streak")
-    if (type(streak) is int
-            and streak >= contract["calibration"]["hy_oas_initial_widening_streak"]):
-        active.add("hy_streak")
-    decomposition = macro.get("decomposition", {})
-    wti_change = trusted_macro_value(
-        macro, ["series", "DCOILWTICO", "chg_pct"]
-    )
-    dgs_change = trusted_macro_value(
-        macro, ["decomposition", "d_dgs10_bps"]
-    )
-    if (trusted_macro_value(macro, ["decomposition", "driver"]) == "breakeven"
-            and direction(dgs_change, contract["direction_thresholds"]["dgs10_delta_bps"]) == "up"
-            and direction(wti_change, contract["direction_thresholds"]["wti_chg_pct"]) == "up"):
-        active.add("breakeven_wti_up")
-    term_delta = trusted_macro_value(
-        macro, ["series", "THREEFYTP10", "delta_bps"]
-    )
-    move_delta = trusted_macro_value(macro, ["move_index", "delta_abs"])
-    repo_spread = trusted_macro_value(
-        macro, ["repo_stress", "sofr_iorb_bps"]
-    )
-    funding = (
-        type(move_delta) in (int, float) and move_delta > 0
-    ) or (
-        type(repo_spread) in (int, float) and repo_spread >= 0
-    )
-    if (type(term_delta) in (int, float)
-            and term_delta >= contract["calibration"]["term_premium_initial_delta_bps"]
-            and funding):
-        active.add("term_premium_funding")
-    return active
-
-
-def validate_state_fields(score, macro, prior, baseline, monetary_side, trigger,
-                          evidence, contract, failures):
-    if score.get("timezone") != contract["timezone"]:
-        failures.add("score.json timezone does not match contract")
-    if score.get("regime") not in contract["regimes"]:
-        failures.add("score.json regime is invalid")
-    if score.get("trigger_state") not in contract["trigger_states"]:
-        failures.add("score.json trigger_state is invalid")
-    if score.get("monetary_side") not in contract["monetary_sides"]:
-        failures.add("score.json monetary_side is invalid")
-    streak = score.get("hy_oas_widening_streak")
-    valid_streak = type(streak) is int and streak >= 0
-    if not valid_streak:
-        failures.add("score.json hy_oas_widening_streak must be a nonnegative integer")
-    current_dev = score.get("sp500_dev200_pct")
-    if current_dev is not None and (
-            type(current_dev) not in (int, float) or not math.isfinite(current_dev)):
-        failures.add("score.json sp500_dev200_pct must be finite numeric or null")
-
-    macro_dev = trusted_macro_value(macro, ["sp500_trend", "dev200_pct"])
-    expected_dev = macro_dev if type(macro_dev) in (int, float) else None
-    if current_dev != expected_dev:
-        failures.add("score.json sp500_dev200_pct != macro sp500_trend.dev200_pct")
-
-    delta = trusted_macro_value(
-        macro, ["series", "BAMLH0A0HYM2", "delta_bps"]
-    )
-    previous_streak = 0 if baseline else prior.get("hy_oas_widening_streak", 0)
-    expected_streak = previous_streak + 1 if type(delta) in (int, float) and delta > 0 else 0
-    if streak != expected_streak:
-        failures.add(f"score.json HY widening streak {streak} != {expected_streak}")
-
-    reasons = score.get("trigger_reasons")
-    if not isinstance(reasons, list):
-        return
-    machine_active = active_machine_trigger_reasons(
-        score, macro, baseline, monetary_side, contract
-    )
-    configured = contract["trigger_reason_codes"]
-    declared_machine = {
-        reason for reason in reasons
-        if reason in configured and configured[reason]["kind"] == "machine"
-    }
-    if declared_machine != machine_active:
-        failures.add(
-            f"score.json machine trigger reasons {sorted(declared_machine)} "
-            f"!= active {sorted(machine_active)}"
-        )
-
-    report_day = date.fromisoformat(score["date"])
-
-    def qualifying_evidence(rule):
-        tag = rule["evidence_tag"]
-        allowed_sources = set(rule["source_ids"])
-        raw_matches = [
-            (source_id, row) for source_id, rows in evidence["raw_by_id"].items()
-            for row in rows
-            if row[1].startswith(tag) and contains_valid_http_url(row[3])
-        ]
-        trace_matches = [
-            (source_id, row) for source_id, rows in evidence["traces_by_id"].items()
-            for row in rows
-            if row[1].startswith(tag) and contains_valid_http_url(row[3])
-        ]
-        tagged = trace_matches if rule.get("trace_required") else raw_matches + trace_matches
-        eligible = [
-            (source_id, row) for source_id, row in tagged
-            if source_id in allowed_sources and evidence["success"].get(source_id)
-        ]
-        max_age = int(rule["window"][:-1])
-        in_window = []
-        for source_id, row in eligible:
-            try:
-                evidence_day = date.fromisoformat(row[4])
-            except (TypeError, ValueError):
-                continue
-            if report_day - timedelta(days=max_age) <= evidence_day <= report_day:
-                in_window.append((source_id, row))
-        prerequisite = rule.get("prerequisite")
-        prerequisite_ok = not prerequisite or evaluate_anchor_rule(
-            prerequisite, score, macro, prior, baseline, contract
-        ) is True
-        return in_window if prerequisite_ok else []
-
-    active_evidence = {
-        code for code, rule in configured.items()
-        if rule["kind"] == "evidence" and qualifying_evidence(rule)
-    }
-    declared_evidence = {
-        reason for reason in reasons
-        if reason in configured and configured[reason]["kind"] == "evidence"
-    }
-    if declared_evidence != active_evidence:
-        failures.add(
-            f"score.json evidence trigger reasons {sorted(declared_evidence)} "
-            f"!= active tagged evidence {sorted(active_evidence)}"
-        )
-    for reason in declared_evidence:
-        rule = configured[reason]
-        eligible = qualifying_evidence(rule)
-        if not eligible:
-            required_kind = "trace" if rule.get("trace_required") else "raw/trace"
-            failures.add(
-                f"trigger reason {reason} lacks tagged in-window {required_kind} evidence"
-            )
-        prerequisite = rule.get("prerequisite")
-        if prerequisite and evaluate_anchor_rule(
-                prerequisite, score, macro, prior, baseline, contract) is not True:
-            failures.add(f"trigger reason {reason} fails its machine prerequisite")
-    ranks = {state: index for index, state in enumerate(contract["trigger_states"])}
-    expected_state = "未擊發"
-    for reason in reasons:
-        rule = configured.get(reason)
-        if rule and ranks[rule["state"]] > ranks[expected_state]:
-            expected_state = rule["state"]
-    if monetary_side == "扳機側" and expected_state == "未擊發":
-        failures.add(
-            "D5 扳機側 requires an independently validated trigger reason"
-        )
-    if trigger != expected_state or score.get("trigger_state") != expected_state:
-        failures.add(
-            f"deterministic trigger state must be {expected_state}, not {trigger!r}"
-        )
-
-
-def validate_new_signals(doc, score, prior, macro, baseline, monetary_side,
-                         report_day, contract, failures):
-    visible = [line.strip() for _, line in doc.section_lines("## 本次新增訊號") if line.strip()]
-    body = "\n".join(visible)
-    if not body:
-        failures.add("本次新增訊號 section is empty")
-        return
-    structural_rows = find_table(
-        doc.section_lines("## §1 六維度風險條圖"),
-        contract["section1_header"], "§1 marker cross-check", failures,
-    )
-    has_global_marker = any(
-        row[0] == "結構性槓桿" and row[2].endswith(" ◆")
-        for row in structural_rows
-    )
-    mentions_global = "全球槓桿擴散訊號" in body
-    if has_global_marker != mentions_global:
-        failures.add("§1 ◆ marker and 本次新增訊號 global-leverage disclosure disagree")
-    if baseline:
-        if "基準日" not in body:
-            failures.add("baseline new-signals section must say 基準日")
-        return
-    prior_date_text = prior.get("date") or macro.get("prior_run_date")
-    prior_day = (
-        strict_date(prior_date_text, "effective prior date", failures)
-        if prior_date_text and prior_date_text != "none" else None
-    )
-    if report_day and prior_day:
-        interval = (report_day - prior_day).days
-        if f"vs 前次（{interval}天前）" not in body:
-            failures.add("new-signals section lacks the exact prior-run interval label")
-    for dimension in contract["dimensions"]:
-        key = dimension["key"]
-        if score[key] != prior[key] and dimension["name"] not in body:
-            failures.add(f"new-signals section omits changed dimension {dimension['name']}")
-    if monetary_side == "扳機側" and "貨幣與信貸環境" not in body:
-        failures.add("D5 扳機側 must be surfaced in 本次新增訊號")
-    if any(score[d["key"]] != prior[d["key"]] for d in contract["dimensions"]):
-        if body in ("無。", "- 無。"):
-            failures.add("new-signals section cannot say 無 when scores changed")
-
-
-def validate_institutional_section(doc, report_day, failures):
-    body = [
-        line.strip() for _, line in doc.section_lines("## 機構情緒對照")
-        if line.strip()
-    ]
-    if not body:
-        failures.add("機構情緒對照 section must not be empty")
-        return
-    placeholder = "本次無新機構調查數據。"
-    if placeholder in body:
-        if body != [placeholder]:
-            failures.add(
-                "institutional no-data placeholder must be the section's only content"
-            )
-        return
-    joined = "\n".join(body)
-    if "BofA" not in joined and "JPM" not in joined:
-        failures.add("機構情緒對照 needs the locked no-data line or BofA/JPM evidence")
-    dates = re.findall(DATE_RE, joined)
-    if not dates:
-        failures.add("institutional survey evidence lacks a data date")
-    else:
-        survey_day = strict_date(dates[-1], "institutional survey date", failures)
-        if survey_day and report_day and survey_day > report_day:
-            failures.add("institutional survey date is in the future")
 
 
 def status_token(cell, contract, where, failures):
@@ -3393,6 +1901,12 @@ def macro_component_evidence_fields(component, block):
             "prior_transaction_volume_usd_bn": "prior_date",
             "chg_pct": "latest_date",
         }
+    elif component["key"] == "ndx_drawdown":
+        primary = "latest"
+        date_fields = {
+            "latest": "latest_date", "high": "high_date",
+            "drawdown_pct": "latest_date", "r1_threshold_level": "latest_date",
+        }
     elif component["key"] == "vix_spx_comove":
         primary = "vix"
         date_fields = {
@@ -3408,6 +1922,443 @@ def macro_component_evidence_fields(component, block):
         if finite_number(block.get(field)) and isinstance(block.get(date_field), str)
     }
     return primary, fields
+
+
+# Heading roles.  The contract owns the heading text and count; these indexes
+# only name which contract heading plays which role.
+H_CONCLUSION, H_RESOLUTION, H_PATHS = 0, 1, 2
+H_COMPARISON, H_GAPS, H_APPENDIX, H_ARCHIVE = 5, 6, 7, 8
+DRY_RUN_BANNER = "> [DRY RUN] this report was not committed to archive."
+PATH_TAGS = ("[R1]", "[R2]", "[R3]", "[整體]")
+
+
+def json_equal(left, right):
+    """JSON equality that never conflates booleans with numbers."""
+    if isinstance(left, bool) or isinstance(right, bool):
+        return type(left) is type(right) and left == right
+    if isinstance(left, dict) and isinstance(right, dict):
+        return set(left) == set(right) and all(
+            json_equal(left[key], right[key]) for key in left)
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            json_equal(a, b) for a, b in zip(left, right))
+    if type(left) in (int, float) and type(right) in (int, float):
+        return left == right
+    return type(left) is type(right) and left == right
+
+
+def section_text(doc, heading):
+    return "\n".join(line for _, line in doc.section_lines(heading))
+
+
+def validate_headings_and_fence(doc, contract, failures):
+    h1 = [h for h in doc.headings if h[1] == 1]
+    if len(h1) != 1:
+        failures.add(f"report must contain exactly one visible H1; found {len(h1)}")
+    actual_h2 = [h[3] for h in doc.headings if h[1] == 2]
+    if actual_h2 != contract["headings"]:
+        failures.add(f"visible H2 headings/order mismatch: {actual_h2}")
+        return None
+    headings = contract["headings"]
+    paths_start = next(h[0] for h in doc.headings if h[3] == headings[H_PATHS])
+    paths_end = next(
+        (h[0] for h in doc.headings if h[1] == 2 and h[0] > paths_start),
+        len(doc.lines),
+    )
+    path_h3 = [h[3] for h in doc.headings
+               if h[1] == 3 and paths_start < h[0] < paths_end]
+    expected_paths = [p["heading"] for p in contract["resolution"]["paths"]]
+    if path_h3 != expected_paths:
+        failures.add(f"path H3 headings/order mismatch: {path_h3}")
+    appendix_start = next(h[0] for h in doc.headings if h[3] == headings[H_APPENDIX])
+    appendix_end = next(h[0] for h in doc.headings if h[3] == headings[H_ARCHIVE])
+    appendix_h3 = [h[3] for h in doc.headings
+                   if h[1] == 3 and appendix_start < h[0] < appendix_end]
+    stray_h3 = [h[3] for h in doc.headings
+                if h[1] == 3 and not paths_start < h[0] < paths_end
+                and not appendix_start < h[0] < appendix_end]
+    if stray_h3:
+        failures.add(f"H3 headings outside 三條路徑現況/數據附錄 are not allowed: {stray_h3}")
+    if appendix_h3 != contract["appendix_headings"]:
+        failures.add("appendix H3 headings/order must be Raw data, Coverage, traceability")
+    if len(doc.fences) != 1:
+        failures.add(f"report must contain exactly one code fence; found {len(doc.fences)}")
+        return None
+    fence = doc.fences[0]
+    if fence["char"] != "`" or fence["info"] != "json":
+        failures.add("the only code fence must be labelled exactly `json`")
+    if fence["section"] != headings[H_ARCHIVE]:
+        failures.add(f"forecast JSON fence is outside `{headings[H_ARCHIVE]}`")
+    return parse_json_text(fence["content"], "forecast JSON fence", failures)
+
+
+def validate_title_and_meta(doc, forecast, dry_run, contract, failures):
+    """Banner, title and meta line; returns the report date."""
+    nonempty = doc.visible_nonempty()
+    has_banner = bool(nonempty and nonempty[0][1] == DRY_RUN_BANNER)
+    if dry_run and not has_banner:
+        failures.add("dry-run report must begin with the locked DRY RUN banner")
+    if not dry_run and has_banner:
+        failures.add("production report must not contain the DRY RUN banner")
+    if has_banner:
+        nonempty = nonempty[1:]
+    first_h2_line = min((h[0] for h in doc.headings if h[1] == 2), default=len(doc.lines))
+    prefix = [(i, line) for i, line in nonempty if i < first_h2_line]
+    if len(prefix) != 2:
+        failures.add("title area must contain exactly the H1 title and the meta line")
+        return None
+    title_match = re.fullmatch(f"# ({DATE_RE}) AI 泡沫破裂預測報告", prefix[0][1])
+    if not title_match:
+        failures.add("report title must be `# YYYY-MM-DD AI 泡沫破裂預測報告`")
+        return None
+    report_day = strict_date(title_match.group(1), "report title date", failures)
+    meta_match = re.fullmatch(
+        f"報告日期：({DATE_RE})｜ISO 週次：(\\d{{4}}-W\\d{{2}})"
+        f"｜預測窗口：({DATE_RE}) → ({DATE_RE})｜前次基準：(.+)",
+        prefix[1][1],
+    )
+    if not meta_match:
+        failures.add("meta line format is invalid")
+        return report_day
+    if report_day is None:
+        return None
+    if meta_match.group(1) != title_match.group(1):
+        failures.add("meta report date must match title date")
+    iso = report_day.isocalendar()
+    if meta_match.group(2) != f"{iso.year}-W{iso.week:02d}":
+        failures.add(f"meta ISO week {meta_match.group(2)} is incorrect")
+    horizon_end = (
+        report_day + timedelta(days=contract["question"]["horizon_days"])
+    ).isoformat()
+    if (meta_match.group(3), meta_match.group(4)) != (
+            report_day.isoformat(), horizon_end):
+        failures.add(f"meta 預測窗口 must be {report_day.isoformat()} → {horizon_end}")
+    prior_meta = meta_match.group(5)
+    prior_date = forecast.get("prior_date") if isinstance(forecast, dict) else None
+    if prior_date is None:
+        if prior_meta != "無（基準）":
+            failures.add("baseline meta must say `前次基準：無（基準）`")
+    else:
+        prior_day = None
+        if isinstance(prior_date, str) and re.fullmatch(DATE_RE, prior_date):
+            try:
+                prior_day = date.fromisoformat(prior_date)
+            except ValueError:
+                prior_day = None
+        if prior_day is None:
+            return report_day
+        expected = f"report-{prior_date}（{(report_day - prior_day).days}天前）"
+        if prior_meta != expected:
+            failures.add(f"meta prior reference must be `{expected}`")
+    return report_day
+
+
+def validate_conclusion(doc, forecast, contract, failures):
+    heading = contract["headings"][H_CONCLUSION]
+    lines = [line.strip() for _, line in doc.section_lines(heading) if line.strip()]
+    literals = contract["conclusion_line"]
+    answer = forecast.get("answer")
+    if not lines:
+        failures.add("conclusion section is empty")
+        return
+    if lines[0] not in literals.values():
+        failures.add(f"first conclusion line must be one of {sorted(literals.values())}")
+    elif answer in literals and lines[0] != literals[answer]:
+        failures.add("conclusion line does not match forecast answer")
+    for line in lines[1:]:
+        if any(literal in line for literal in literals.values()):
+            failures.add(f"conclusion section repeats a conclusion line: {line[:60]}")
+
+
+def validate_resolution_section(doc, contract, failures):
+    heading = contract["headings"][H_RESOLUTION]
+    lines = [line for _, line in doc.section_lines(heading)]
+    block = contract["resolution"]["block"].split("\n")
+    starts = [
+        i for i in range(len(lines) - len(block) + 1)
+        if [line.rstrip() for line in lines[i:i + len(block)]]
+        == [line.rstrip() for line in block]
+    ]
+    if len(starts) != 1:
+        failures.add("resolution section must contain the contract resolution block verbatim exactly once")
+        return
+    before = [line for line in lines[:starts[0]] if line.strip()]
+    rest = [line.strip() for line in lines[starts[0] + len(block):] if line.strip()]
+    version_line = f"解析版本：v{contract['resolution']['version']}"
+    if not rest or rest[0] != version_line:
+        failures.add(f"resolution block must be followed by the line `{version_line}`")
+    elif before or len(rest) != 1:
+        failures.add(
+            "resolution section must contain only the contract block and the "
+            f"`{version_line}` line"
+        )
+
+
+NDX_CLAIM_RE = re.compile(
+    r"距\s*52\s*週高點回撤[^0-9%\n\-−]{0,4}?([-−]?\s*[0-9]+(?:\.[0-9]+)?)\s*%"
+)
+
+
+def validate_paths_section(doc, macro, contract, failures):
+    parent = contract["headings"][H_PATHS]
+    ndx = macro.get("ndx_drawdown", {})
+    for path in contract["resolution"]["paths"]:
+        lines = doc.subsection_lines(path["heading"], parent)
+        if not lines:
+            failures.add(f"path section {path['heading']} is missing or empty")
+            continue
+        text = "\n".join(line for _, line in lines)
+        if not any(line.strip().startswith("**判讀：**") for _, line in lines):
+            failures.add(f"path section {path['heading']} lacks a `**判讀：**` line")
+        if path["id"] != "R1":
+            continue
+        if ndx.get("status") == "ok":
+            expected = f"距 52 週高點回撤 {ndx['drawdown_pct']:.2f}%"
+            if expected not in text:
+                failures.add(f"R1 section must state `{expected}` from the macro artifact")
+        elif "R1 回撤不可用" not in text:
+            failures.add("R1 section must state `R1 回撤不可用` when ndx_drawdown failed")
+    for heading in contract["headings"]:
+        for match in NDX_CLAIM_RE.finditer(section_text(doc, heading)):
+            claimed = float(re.sub(r"\s", "", match.group(1)).replace("−", "-"))
+            if ndx.get("status") != "ok":
+                failures.add(
+                    f"{heading} states a NASDAQ-100 drawdown `{match.group(0)}` "
+                    "although ndx_drawdown failed"
+                )
+            elif round(claimed, 2) != ndx["drawdown_pct"]:
+                failures.add(
+                    f"{heading} drawdown claim `{match.group(0)}` != artifact "
+                    f"drawdown_pct {ndx['drawdown_pct']:.2f}"
+                )
+
+
+def top_level_bullets(lines):
+    """Split a section into top-level list items plus any stray prose lines.
+
+    CommonMark allows 0-3 spaces before a top-level marker. An indented marker
+    directly continuing a bullet (no blank line) is a nested item and stays
+    part of its parent; after a blank line it starts a new top-level item.
+    """
+    bullets, current, stray = [], None, []
+    for _, line in lines:
+        marker = re.match(r"( {0,3})[-*+] ", line)
+        if re.match(r" {0,3}(?:[0-9]{1,9}[.)](?: |$)|>)", line):
+            # Ordered items and blockquotes are separate blocks, never part
+            # of a cited bullet, and are not allowed in evidence sections.
+            current = None
+            stray.append(line.strip())
+        elif marker and (current is None or len(marker.group(1)) < 2):
+            current = [line.lstrip()]
+            bullets.append(current)
+        elif not line.strip() or re.match(r" {0,3}#{1,6} ", line):
+            current = None
+        elif current is not None:
+            current.append(line)
+        else:
+            stray.append(line.strip())
+    return ["\n".join(bullet) for bullet in bullets], stray
+
+
+def cited_source_ids(text, source_ids):
+    return [token.strip() for token in re.findall(r"`([^`\n]+)`", text)
+            if token.strip() in source_ids]
+
+
+def validate_evidence_sections(doc, evidence, contract, failures):
+    source_ids = {source["id"] for source in contract["sources"]}
+    available = evidence["available"]
+    spec = contract["evidence_sections"]
+    for index in spec["heading_indexes"]:
+        heading = contract["headings"][index]
+        bullets, stray = top_level_bullets(doc.section_lines(heading))
+        if stray:
+            failures.add(
+                f"{heading} may contain only tagged, cited bullets; stray text: {stray[0][:40]}"
+            )
+        if len(bullets) < spec["min_bullets"]:
+            failures.add(
+                f"{heading} needs at least {spec['min_bullets']} top-level bullet(s)"
+            )
+        for bullet in bullets:
+            body = bullet[2:].lstrip()
+            if not body.startswith(PATH_TAGS):
+                failures.add(f"{heading} bullet must start with a path tag: {body[:40]}")
+            cited = cited_source_ids(bullet, source_ids)
+            if not any(available.get(source_id) for source_id in cited):
+                failures.add(
+                    f"{heading} bullet cites no successful contract source_id: {body[:40]}"
+                )
+    skipped = {contract["headings"][H_APPENDIX], contract["headings"][H_GAPS]}
+    h2_by_line = {h[0]: h[3] for h in doc.headings if h[1] == 2}
+    section = None
+    flagged = set()
+    for index, line in doc.visible:
+        section = h2_by_line.get(index, section)
+        if section in skipped:
+            continue
+        for source_id in cited_source_ids(line, source_ids):
+            if not available.get(source_id) and source_id not in flagged:
+                flagged.add(source_id)
+                failures.add(
+                    f"body cites {source_id} whose Coverage status is not successful"
+                )
+
+
+def validate_forecast_object(forecast, contract, macro, report_day, label, failures):
+    fields = contract["forecast_schema"]["current_fields"]
+    if set(forecast) != set(fields):
+        failures.add(
+            f"{label} fields mismatch: missing {sorted(set(fields) - set(forecast))}, "
+            f"extra {sorted(set(forecast) - set(fields))}"
+        )
+        return
+    day = strict_date(forecast["date"], f"{label} date", failures)
+    if day and report_day and day != report_day:
+        failures.add(f"{label} date does not match report title")
+    if day:
+        iso = day.isocalendar()
+        if forecast["iso_week"] != f"{iso.year}-W{iso.week:02d}":
+            failures.add(f"{label} iso_week does not match date")
+        if forecast["weekday"] != day.strftime("%A"):
+            failures.add(f"{label} weekday does not match date")
+        expected_end = (
+            day + timedelta(days=contract["question"]["horizon_days"])
+        ).isoformat()
+        if forecast["horizon_end"] != expected_end:
+            failures.add(f"{label} horizon_end must be {expected_end}")
+    if forecast["timezone"] != contract["timezone"]:
+        failures.add(f"{label} timezone must be {contract['timezone']}")
+    if (type(forecast["question_version"]) is not int
+            or forecast["question_version"] != contract["question"]["version"]):
+        failures.add(f"{label} question_version does not match contract")
+    if (type(forecast["resolution_version"]) is not int
+            or forecast["resolution_version"] != contract["resolution"]["version"]):
+        failures.add(f"{label} resolution_version does not match contract")
+    if forecast["answer"] not in contract["question"]["answers"]:
+        failures.add(f"{label} answer must be one of {contract['question']['answers']}")
+    if forecast["prior_date"] is not None:
+        prior_day = strict_date(forecast["prior_date"], f"{label} prior_date", failures)
+        if prior_day and day and prior_day >= day:
+            failures.add(f"{label} prior_date must be strictly before date")
+    if (forecast["prior_answer"] is not None
+            and forecast["prior_answer"] not in contract["question"]["answers"]):
+        failures.add(f"{label} prior_answer must be null or one of the answers")
+    flips = forecast["flip_evidence"]
+    if not isinstance(flips, list) or any(not isinstance(i, str) for i in flips):
+        failures.add(f"{label} flip_evidence must be an array of strings")
+    ndx = macro.get("ndx_drawdown", {})
+    if ndx.get("status") == "ok":
+        if (not finite_number(forecast["r1_drawdown_pct"])
+                or forecast["r1_drawdown_pct"] != ndx.get("drawdown_pct")):
+            failures.add(f"{label} r1_drawdown_pct must equal macro ndx_drawdown.drawdown_pct")
+    elif forecast["r1_drawdown_pct"] is not None:
+        failures.add(f"{label} r1_drawdown_pct must be null when ndx_drawdown failed")
+    if forecast["resolution"] is not None:
+        failures.add(f"{label} resolution must be null")
+
+
+def evidence_days(evidence, source_id):
+    days = []
+    for row in (evidence["raw_by_id"].get(source_id, [])
+                + evidence["traces_by_id"].get(source_id, [])):
+        if re.fullmatch(DATE_RE, row[4]):
+            try:
+                days.append(date.fromisoformat(row[4]))
+            except ValueError:
+                pass
+    return days
+
+
+def validate_prior_and_flip(doc, forecast, prior, evidence, macro, contract, failures):
+    fields = contract["forecast_schema"]["current_fields"]
+    heading = contract["headings"][H_COMPARISON]
+    lines = [line.strip() for _, line in doc.section_lines(heading) if line.strip()]
+    text = "\n".join(lines)
+    first = lines[0] if lines else None
+    prior_date, prior_answer = forecast.get("prior_date"), forecast.get("prior_answer")
+    flips = forecast.get("flip_evidence")
+    macro_prior = macro.get("prior_run_date")
+    if prior is None:
+        if prior_answer is not None:
+            failures.add("prior_answer must be null without a prior forecast")
+        if flips != []:
+            failures.add("flip_evidence must be [] without a prior forecast")
+        if prior_date is None:
+            if macro_prior != "none":
+                failures.add("baseline forecast requires macro prior_run_date `none`")
+            expected = "前次結論：無前次（基準）"
+        else:
+            if macro_prior != prior_date:
+                failures.add("macro prior_run_date does not match forecast prior_date")
+            expected = f"前次結論：無前次預測（report-{prior_date} 為舊格式評分報告）"
+        if first != expected:
+            failures.add(f"{heading} first line must be `{expected}`")
+        return
+    missing = [field for field in fields if field not in prior]
+    if missing:
+        failures.add(f"prior forecast lacks fields: {missing}")
+        return
+    prior_day = strict_date(prior["date"], "prior forecast date", failures)
+    if prior["answer"] not in contract["question"]["answers"]:
+        failures.add("prior forecast answer is invalid")
+        return
+    if prior_date != prior["date"]:
+        failures.add("forecast prior_date does not match prior forecast date")
+    if prior_answer != prior["answer"]:
+        failures.add("forecast prior_answer does not match prior forecast answer")
+    if macro_prior != prior["date"]:
+        failures.add("macro prior_run_date does not match prior forecast date")
+    expected = f"前次結論：{prior['answer']}（report-{prior['date']}）"
+    if first != expected:
+        failures.add(f"{heading} first line must be `{expected}`")
+    verdict_lines = [line for line in lines if line.startswith("本次結論：")]
+    answer = forecast.get("answer")
+    if answer != prior["answer"]:
+        if verdict_lines != ["本次結論：翻轉"]:
+            failures.add(f"{heading} must contain exactly the line `本次結論：翻轉`")
+        if not isinstance(flips, list) or not flips:
+            failures.add("flip_evidence must be non-empty when the answer flipped")
+            return
+        if len(flips) != len(set(flips)):
+            failures.add("flip_evidence must not contain duplicates")
+        source_ids = {source["id"] for source in contract["sources"]}
+        cited = set(cited_source_ids(text, source_ids))
+        for source_id in flips:
+            if source_id not in source_ids:
+                failures.add(f"flip_evidence {source_id!r} is not a contract source_id")
+                continue
+            if not evidence["available"].get(source_id):
+                failures.add(f"flip_evidence {source_id} lacks a successful Coverage status")
+            if prior_day and not any(
+                    day > prior_day for day in evidence_days(evidence, source_id)):
+                failures.add(
+                    f"flip_evidence {source_id} has no Raw/traceability row dated after "
+                    "the prior forecast"
+                )
+            if source_id not in cited:
+                failures.add(f"flip_evidence {source_id} is not cited in {heading}")
+    else:
+        if verdict_lines != ["本次結論：維持"]:
+            failures.add(f"{heading} must contain exactly the line `本次結論：維持`")
+        if flips != []:
+            failures.add("flip_evidence must be [] when the answer is unchanged")
+
+
+def validate_gaps_section(doc, evidence, contract, failures):
+    heading = contract["headings"][H_GAPS]
+    text = section_text(doc, heading)
+    failed = [source_id for source_id, token in evidence["coverage_tokens"].items()
+              if token == "⛔ FETCH FAILED"]
+    none_line = "本次無 FETCH FAILED 來源"
+    if failed:
+        for source_id in failed:
+            if not mentions_identifier(text, source_id):
+                failures.add(f"{heading} must mention FETCH FAILED source {source_id}")
+        if none_line in text:
+            failures.add(f"{heading} claims no FETCH FAILED source although some failed")
+    elif not any(line.strip() == none_line for line in text.splitlines()):
+        failures.add(f"{heading} must contain the line `{none_line}`")
 
 
 def validate_spv_deal_rows(rows, marker, where, failures):
@@ -3506,10 +2457,12 @@ def validate_spv_deal_rows(rows, marker, where, failures):
 
 
 def validate_appendix(doc, report_day, macro, contract, failures):
-    raw_section = doc.subsection_lines("### Raw data", "## 數據附錄")
-    coverage_section = doc.subsection_lines("### Coverage", "## 數據附錄")
+    appendix_h2 = contract["headings"][H_APPENDIX]
+    raw_heading, coverage_heading, trace_heading = contract["appendix_headings"]
+    raw_section = doc.subsection_lines(raw_heading, appendix_h2)
+    coverage_section = doc.subsection_lines(coverage_heading, appendix_h2)
     trace_section = doc.subsection_lines(
-        "### SEARCH-VERIFIED traceability", "## 數據附錄"
+        trace_heading, appendix_h2
     )
     raw_rows = find_table(
         raw_section, contract["raw_data_header"], "raw data", failures
@@ -3784,6 +2737,21 @@ def validate_appendix(doc, report_day, macro, contract, failures):
                         "from the macro artifact"
                     )
 
+        if (token == "✓ API" and any(
+                item[0]["key"] == "ndx_drawdown" for item in successful_components)):
+            ndx_block = macro["ndx_drawdown"]
+            for field in ("latest", "high", "drawdown_pct"):
+                day_field = "high_date" if field == "high" else "latest_date"
+                if not any(
+                        mentions_identifier(row[1], field)
+                        and row[4] == ndx_block[day_field]
+                        and displayed_matches(row[2], ndx_block[field])
+                        for row in raw_by_id.get(source_id, [])):
+                    failures.add(
+                        f"raw evidence for {source_id} lacks a reproducible "
+                        f"ndx_drawdown {field} row"
+                    )
+
         if token == "✓ SEARCH-VERIFIED" and failed_components:
             trace_rows_for_source = traces_by_id.get(source_id, [])
 
@@ -3877,10 +2845,22 @@ def validate_wording_lock(doc, contract, failures):
                     )
 
 
+def validate_scoring_terms(doc, contract, failures):
+    """The report answers yes/no only: no scores or forecast probabilities."""
+    appendix = contract["headings"][H_APPENDIX]
+    h2_by_line = {h[0]: h[3] for h in doc.headings if h[1] == 2}
+    section = None
+    for index, line in doc.visible:
+        section = h2_by_line.get(index, section)
+        if section == appendix:
+            continue
+        for term in contract["wording_lock"]["forbidden_scoring_terms"]:
+            if term.casefold() in line.casefold():
+                failures.add(f"scoring/probability term `{term}` is not allowed: {line.strip()[:80]}")
+
+
 def validate_unexpected_tables(doc, contract, failures):
     allowed = {
-        contract["section1_header"], contract["section2_header"],
-        contract["section3_header"], contract["weighted_score_header"],
         contract["coverage_header"], contract["raw_data_header"],
         contract["traceability_header"],
     }
@@ -3896,19 +2876,18 @@ def validate_unexpected_tables(doc, contract, failures):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Validate a bubble-risk report before archive mutation."
+        description="Validate a bubble-risk forecast report before archive mutation."
     )
     parser.add_argument("report", help="complete report Markdown")
+    parser.add_argument("--current-forecast", required=True,
+                        help="standalone forecast.json payload that will be archived")
     parser.add_argument("--prompt", required=True, help="version-matched prompt Markdown")
     parser.add_argument("--contract", required=True, help="report_contract.json")
     parser.add_argument("--macro-json", required=True, help="exact fetch_macro JSON output")
-    parser.add_argument(
-        "--current-score", required=True,
-        help="standalone score.json payload that will be archived",
-    )
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--prior-score", help="accepted prior score.json")
-    mode.add_argument("--baseline", action="store_true", help="validate without a prior run")
+    prior = parser.add_mutually_exclusive_group(required=True)
+    prior.add_argument("--prior-forecast", help="accepted prior forecast.json")
+    prior.add_argument("--no-prior-forecast", action="store_true",
+                       help="legacy score.json prior or baseline run")
     run_mode = parser.add_mutually_exclusive_group(required=True)
     run_mode.add_argument("--production", action="store_true")
     run_mode.add_argument("--dry-run", action="store_true")
@@ -3927,109 +2906,58 @@ def main(argv=None):
         args.macro_json, "macro JSON", failures,
         allow_markers=True, require_markers=True,
     )
-    current_score = load_json_file(args.current_score, "current score", failures)
-    prior_raw = None
+    current = load_json_file(args.current_forecast, "current forecast", failures)
     prior = None
-    if args.prior_score:
-        prior_raw = load_json_file(args.prior_score, "prior score", failures)
-        if prior_raw is not None:
-            prior = validate_prior(prior_raw, contract, failures)
-    if (prompt is None or report is None or macro is None or current_score is None
-            or (not args.baseline and prior is None)):
+    if args.prior_forecast:
+        prior = load_json_file(args.prior_forecast, "prior forecast", failures)
+        if prior is None:
+            return failures.emit_and_exit()
+    if prompt is None or report is None or macro is None or current is None:
         return failures.emit_and_exit()
     if not validate_macro_shape(macro, contract, failures):
         return failures.emit_and_exit()
 
     validate_prompt_mapping(prompt, contract, failures)
-    if args.baseline:
-        if macro.get("prior_run_date") != "none":
-            failures.add("baseline mode requires macro prior_run_date `none`")
+    if macro.get("prior_run_date") == "none":
         decomposition = macro.get("decomposition", {})
         if (decomposition.get("status"), decomposition.get("driver"),
                 decomposition.get("freshness")) != (
                     "baseline_no_prior", "baseline", "not_applicable"):
             failures.add("baseline macro decomposition state is invalid")
-    else:
-        if macro.get("prior_run_date") == "none":
-            failures.add("prior mode cannot use macro prior_run_date `none`")
-        if prior.get("date") and macro.get("prior_run_date") != prior.get("date"):
-            failures.add("macro prior_run_date does not match prior score artifact")
 
     doc = MarkdownDocument(report, failures)
     validate_global_security(doc, contract, failures)
     validate_wording_lock(doc, contract, failures)
-    score = validate_headings_and_fence(doc, contract, failures)
-    if score is None:
+    validate_scoring_terms(doc, contract, failures)
+    fenced = validate_headings_and_fence(doc, contract, failures)
+    if fenced is None:
         return failures.emit_and_exit()
-    if not validate_score_object(score, contract, failures, exact=True):
-        return failures.emit_and_exit()
-    if not validate_score_object(
-            current_score, contract, failures, label="current score file", exact=True):
-        return failures.emit_and_exit()
-    if current_score != score:
-        failures.add("standalone current score file does not equal the report JSON fence")
+    if not json_equal(fenced, current):
+        failures.add("standalone current forecast file does not equal the report JSON fence")
 
-    report_day, summary = validate_title_meta_summary(
-        doc, score, macro, prior, args.baseline, args.dry_run, contract, failures
+    report_day = validate_title_and_meta(
+        doc, current, args.dry_run, contract, failures
     )
-    score_day = strict_date(score.get("date"), "score.json date", failures)
-    if report_day and score_day and report_day != score_day:
-        failures.add("score.json date does not match report title")
-    if score_day:
-        expected_week = f"{score_day.isocalendar().year}-W{score_day.isocalendar().week:02d}"
-        if score.get("iso_week") != expected_week:
-            failures.add("score.json iso_week does not match date")
-        if score.get("weekday") != score_day.strftime("%A"):
-            failures.add("score.json weekday does not match date")
+    validate_forecast_object(
+        current, contract, macro, report_day, "current forecast", failures
+    )
     generated = parse_iso_timestamp(macro.get("generated_at"))
     if generated and report_day and generated.date() != report_day:
         failures.add("macro generated_at date does not match report date")
 
-    total_delta = validate_section1(doc, score, prior, args.baseline, contract, failures)
-    if summary:
-        if summary["total"] != score.get("total") or summary["tier"] != score.get("tier"):
-            failures.add("summary total/tier does not match score.json")
-        expected_summary_delta = (
-            "—" if total_delta is None
-            else str(total_delta) if type(total_delta) is int
-            else None
-        )
-        if type(total_delta) is int and total_delta > 0:
-            expected_summary_delta = "+" + expected_summary_delta
-        if (expected_summary_delta is not None
-                and summary["delta"].replace("−", "-") != expected_summary_delta):
-            failures.add("summary delta does not match §1 total delta")
     evidence = validate_appendix(doc, report_day, macro, contract, failures)
-    validate_section2_and_history(
-        doc, summary, score, macro, prior, args.baseline,
-        evidence, contract, failures
+    validate_conclusion(doc, current, contract, failures)
+    validate_resolution_section(doc, contract, failures)
+    validate_paths_section(doc, macro, contract, failures)
+    validate_evidence_sections(doc, evidence, contract, failures)
+    validate_prior_and_flip(
+        doc, current, prior, evidence, macro, contract, failures
     )
-    trigger = validate_triangle(
-        doc, score, summary, macro, prior, args.baseline, evidence,
-        contract, failures
-    )
-    monetary_side = validate_dimensions(
-        doc, score, prior, args.baseline, report_day, evidence, macro,
-        contract, failures
-    )
-    validate_weighted_section(doc, score, contract, failures)
-    validate_state_fields(
-        score, macro, prior, args.baseline, monetary_side, trigger,
-        evidence, contract, failures
-    )
-    validate_new_signals(
-        doc, score, prior, macro, args.baseline, monetary_side, report_day,
-        contract, failures
-    )
-    validate_institutional_section(doc, report_day, failures)
+    validate_gaps_section(doc, evidence, contract, failures)
     validate_unexpected_tables(doc, contract, failures)
 
     # Each exact contract table header belongs to exactly one visible table.
-    for key in (
-        "section1_header", "section2_header", "section3_header",
-        "weighted_score_header", "coverage_header", "raw_data_header",
-        "traceability_header",
-    ):
+    for key in ("coverage_header", "raw_data_header", "traceability_header"):
         count = sum(1 for _, line in doc.visible if line.strip() == contract[key])
         if count != 1:
             failures.add(f"contract table header {key} must occur once; found {count}")
