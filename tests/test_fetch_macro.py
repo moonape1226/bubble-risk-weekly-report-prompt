@@ -441,6 +441,7 @@ class OutputSchema(unittest.TestCase):
              mock.patch.object(fm, "execution_now", return_value=now), \
              mock.patch.object(fm, "series_block", return_value=failed.copy()), \
              mock.patch.object(fm, "sp500_trend", return_value=failed.copy()), \
+             mock.patch.object(fm, "ndx_drawdown", return_value=failed.copy()), \
              mock.patch.object(fm, "cftc_lev_funds", return_value=failed.copy()), \
              mock.patch.object(fm, "move_index", return_value=failed.copy()), \
              mock.patch.object(fm, "ofr_repo", return_value=failed.copy()), \
@@ -450,8 +451,9 @@ class OutputSchema(unittest.TestCase):
         payload = stdout.getvalue().split("===MACRO_JSON_START===\n", 1)[1]
         payload = payload.split("\n===MACRO_JSON_END===", 1)[0]
         out = json.loads(payload)
-        self.assertEqual(out["contract_version"], 1)
-        self.assertEqual(out["macro_schema_version"], 1)
+        self.assertEqual(out["contract_version"], fm.REPORT_CONTRACT["version"])
+        self.assertEqual(out["macro_schema_version"], fm.MACRO_SCHEMA["version"])
+        self.assertIn("ndx_drawdown", out)
         self.assertEqual(out["generated_at"], "2027-01-01T01:02:03+08:00")
         generated = fm.datetime.fromisoformat(out["generated_at"])
         self.assertIsNotNone(generated.utcoffset())
@@ -533,6 +535,58 @@ class Sp500Trend(unittest.TestCase):
         raw_ma = sum(raw_values) / len(raw_values)
         self.assertEqual(round((raw_values[0] - raw_ma) / raw_ma * 100, 2),
                          0.01)
+
+
+class NdxDrawdown(unittest.TestCase):
+    @staticmethod
+    def payload(values, start=fm.datetime(2026, 11, 12)):
+        return json.dumps({"observations": [
+            {"date": (start - fm.timedelta(days=i)).strftime("%Y-%m-%d"), "value": str(v)}
+            for i, v in enumerate(values)]})
+
+    def test_drawdown_and_r1_reproduce_from_emitted_window(self):
+        # newest first: latest 75.004 vs a high of 100.004 inside the window,
+        # and a higher close (200) just outside the 252-observation lookback
+        values = [75.004] + [90.0] * 100 + [100.004] + [80.0] * 150 + [200.0] * 5
+        with mock.patch.object(fm, "_get", return_value=self.payload(values)):
+            blk = fm.ndx_drawdown()
+        self.assertEqual(blk["status"], "ok")
+        self.assertEqual(len(blk["window_observations"]), 252)
+        self.assertEqual(blk["high"], 100.0)
+        self.assertEqual(blk["latest"], 75.0)
+        self.assertEqual(blk["drawdown_pct"], 25.0)
+        self.assertTrue(blk["r1_met"])
+        self.assertEqual(blk["r1_threshold_level"], 75.0)
+        vals = [o["value"] for o in blk["window_observations"]]
+        self.assertEqual(round((max(vals) - vals[0]) / max(vals) * 100, 2), blk["drawdown_pct"])
+
+    def test_short_history_fails_closed(self):
+        with mock.patch.object(fm, "_get", return_value=self.payload([100.0] * 251)):
+            self.assertEqual(fm.ndx_drawdown()["status"], "fetch_failed")
+
+    def test_malformed_newest_observation_fails_closed(self):
+        payload = json.loads(self.payload([100.0] * 253))
+        payload["observations"][0]["value"] = "broken"
+        with mock.patch.object(fm, "_get", return_value=json.dumps(payload)):
+            self.assertEqual(fm.ndx_drawdown()["status"], "fetch_failed")
+
+    def test_non_string_observation_value_fails_closed(self):
+        payload = json.loads(self.payload([21000.0] * 253))
+        payload["observations"][0]["value"] = True
+        with mock.patch.object(fm, "_get", return_value=json.dumps(payload)):
+            self.assertEqual(fm.ndx_drawdown()["status"], "fetch_failed")
+
+    def test_fred_missing_marker_is_skipped(self):
+        payload = json.loads(self.payload([90.0] + [100.0] * 252))
+        payload["observations"][0]["value"] = "."
+        with mock.patch.object(fm, "_get", return_value=json.dumps(payload)):
+            blk = fm.ndx_drawdown()
+        self.assertEqual(blk["status"], "ok")
+        self.assertEqual(blk["latest"], 100.0)
+
+    def test_malformed_payload_fails_closed(self):
+        with mock.patch.object(fm, "_get", return_value="not json"):
+            self.assertEqual(fm.ndx_drawdown()["status"], "fetch_failed")
 
 
 class MoveIndex(unittest.TestCase):

@@ -9,7 +9,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_PATH = ROOT / "report_contract.json"
 PROMPT_PATH = ROOT / "bubble-risk-weekly-prompt.md"
-GUIDANCE_PATH = ROOT / "CLAUDE.md"
 VALIDATOR_PATH = ROOT / "scripts" / "validate_report.py"
 
 
@@ -28,18 +27,16 @@ class ReportContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
         cls.prompt = PROMPT_PATH.read_text(encoding="utf-8")
-        cls.guidance = GUIDANCE_PATH.read_text(encoding="utf-8")
 
     def test_contract_core_is_internally_consistent(self):
         contract = self.contract
-        self.assertEqual(contract["version"], 1)
-        self.assertEqual(contract["macro_schema"]["version"], 1)
+        self.assertEqual(contract["version"], 2)
+        self.assertEqual(contract["macro_schema"]["version"], 2)
         self.assertEqual(len(contract["macro_schema"]["required_series"]), 21)
         self.assertEqual(contract["timezone"], "Asia/Taipei")
-        self.assertEqual(len(contract["headings"]), 10)
-        self.assertEqual(len(set(contract["headings"])), 10)
+        self.assertEqual(len(contract["headings"]), 9)
+        self.assertEqual(len(set(contract["headings"])), 9)
         wording_lock = contract["wording_lock"]
-        self.assertIn(2, wording_lock["full_section_heading_indexes"])
         self.assertEqual(
             len(wording_lock["full_section_heading_indexes"]),
             len(set(wording_lock["full_section_heading_indexes"])),
@@ -49,56 +46,41 @@ class ReportContractTests(unittest.TestCase):
             for index in wording_lock["full_section_heading_indexes"]
         ))
         self.assertTrue(wording_lock["forbidden_synonyms"])
-        self.assertEqual(sum(d["weight"] for d in contract["dimensions"]), 100)
-        self.assertEqual(len({d["name"] for d in contract["dimensions"]}), 6)
-        self.assertEqual(len({d["key"] for d in contract["dimensions"]}), 6)
-        self.assertEqual(
-            list(contract["anchor_feature_counts"]), contract["anchors"]
-        )
-        self.assertEqual(list(contract["anchor_features"]), contract["anchors"])
-        self.assertTrue(all(
-            type(count) is int and count > 0
-            for count in contract["anchor_feature_counts"].values()
-        ))
         self.assertTrue(all(
             type(value) in (int, float) and value > 0
             for value in contract["calibration"].values()
         ))
-        self.assertTrue(all(
-            type(value) in (int, float) and value > 0
-            for value in contract["direction_thresholds"].values()
-        ))
 
-        tiers = contract["tiers"]
-        self.assertEqual(tiers[0]["min"], 0)
-        self.assertEqual(tiers[-1]["max"], 100)
-        for left, right in zip(tiers, tiers[1:]):
-            self.assertEqual(left["max"] + 1, right["min"])
+        question = contract["question"]
+        self.assertEqual(question["answers"], ["yes", "no"])
+        self.assertEqual(set(contract["conclusion_line"]), set(question["answers"]))
+        resolution = contract["resolution"]
+        self.assertIn(question["text"], resolution["block"])
+        self.assertEqual(
+            [path["id"] for path in resolution["paths"]], ["R1", "R2", "R3"])
+        self.assertEqual(
+            resolution["r1"]["lookback_trading_days"],
+            contract["macro_schema"]["ndx_drawdown"]["lookback_trading_days"],
+        )
+        self.assertIn("ndx_drawdown", contract["macro_schema"]["required_blocks"])
+        source_ids = {source["id"] for source in contract["sources"]}
+        for path in resolution["paths"]:
+            self.assertTrue(path["heading"].startswith("### "))
+            self.assertLessEqual(set(path["source_ids"]), source_ids)
+        for index in contract["evidence_sections"]["heading_indexes"]:
+            self.assertIn("證據", contract["headings"][index])
 
-        current_fields = contract["score_schema"]["current_fields"]
-        self.assertEqual(len(current_fields), len(set(current_fields)))
-        for dimension in contract["dimensions"]:
-            self.assertIn(dimension["key"], current_fields)
-        for field in contract["score_schema"]["legacy_prior_required_fields"]:
-            self.assertIn(field, current_fields)
-        self.assertIn("trigger_reasons", current_fields)
-
-        feature_ids = []
-        for anchor in contract["anchors"]:
-            features = contract["anchor_features"][anchor]
-            self.assertEqual(
-                len(features), contract["anchor_feature_counts"][anchor]
-            )
-            feature_ids.extend(feature["id"] for feature in features)
-        self.assertEqual(len(feature_ids), 50)
-        self.assertEqual(len(feature_ids), len(set(feature_ids)))
+        fields = contract["forecast_schema"]["current_fields"]
+        self.assertEqual(len(fields), len(set(fields)))
+        self.assertEqual(fields[-1], "resolution")
+        removed = {
+            "dimensions", "tiers", "anchors", "anchor_features", "regimes",
+            "trigger_states", "trigger_reason_codes", "score_schema", "direction_thresholds", "weighted_score_header",
+        }
+        self.assertEqual(removed & set(contract), set())
 
     def test_headers_have_locked_column_counts(self):
         expected_columns = {
-            "section1_header": 5,
-            "section2_header": 4,
-            "section3_header": 3,
-            "weighted_score_header": 4,
             "coverage_header": 4,
             "raw_data_header": 6,
             "traceability_header": 6,
@@ -107,6 +89,57 @@ class ReportContractTests(unittest.TestCase):
             cells = [cell.strip() for cell in self.contract[key].strip().strip("|").split("|")]
             self.assertEqual(len(cells), count, key)
             self.assertTrue(all(cells), key)
+
+    def test_shipped_contract_passes_validator_self_check(self):
+        spec = importlib.util.spec_from_file_location(
+            "validate_report_contract_selfcheck_test", VALIDATOR_PATH
+        )
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+        failures = validator.Failures()
+        self.assertTrue(
+            validator.validate_contract(self.contract, failures), failures.items)
+        self.assertEqual(failures.items, [])
+
+    def test_contract_rejects_inconsistent_v2_policies(self):
+        spec = importlib.util.spec_from_file_location(
+            "validate_report_v2_policy_test", VALIDATOR_PATH
+        )
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+
+        def mutate_version(contract):
+            contract["version"] = 1
+
+        def drop_question(contract):
+            del contract["question"]
+
+        def bad_answers(contract):
+            contract["question"]["answers"] = ["yes", "no", "maybe"]
+
+        def r1_lookback_conflict(contract):
+            contract["macro_schema"]["ndx_drawdown"]["lookback_trading_days"] = 200
+
+        def eight_headings(contract):
+            contract["headings"].pop()
+
+        def unknown_path_source(contract):
+            contract["resolution"]["paths"][0]["source_ids"] = ["made.up"]
+
+        def conclusion_keys(contract):
+            contract["conclusion_line"] = {"yes": "**結論：yes**"}
+
+        for mutate in (
+            mutate_version, drop_question, bad_answers, r1_lookback_conflict,
+            eight_headings, unknown_path_source, conclusion_keys,
+        ):
+            with self.subTest(mutation=mutate.__name__):
+                contract = copy.deepcopy(self.contract)
+                mutate(contract)
+                failures = validator.Failures()
+                self.assertFalse(
+                    validator.validate_contract(contract, failures), failures.items)
+                self.assertTrue(failures.items)
 
     def test_sources_are_stable_unique_and_map_one_to_one_to_prompt(self):
         sources = self.contract["sources"]
@@ -156,6 +189,19 @@ class ReportContractTests(unittest.TestCase):
         self.assertTrue(validator.validate_contract(contract, failures))
         self.assertEqual(failures.items, [])
 
+    def test_contract_rejects_invalid_appendix_headings(self):
+        spec = importlib.util.spec_from_file_location(
+            "validate_report_appendix_headings_test", VALIDATOR_PATH
+        )
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+        contract = copy.deepcopy(self.contract)
+        contract["appendix_headings"] = ["### Raw data", "### Coverage"]
+        failures = validator.Failures()
+        validator.validate_contract(contract, failures)
+        self.assertIn(
+            "contract appendix_headings must be three unique H3 headings", failures.items)
+
     def test_contract_rejects_invalid_wording_lock_policy(self):
         spec = importlib.util.spec_from_file_location(
             "validate_report_wording_policy_test", VALIDATOR_PATH
@@ -166,14 +212,17 @@ class ReportContractTests(unittest.TestCase):
             {
                 "full_section_heading_indexes": [2, len(self.contract["headings"])],
                 "forbidden_synonyms": ["本期"],
+                "forbidden_scoring_terms": ["總分"],
             },
             {
                 "full_section_heading_indexes": [2, 2],
                 "forbidden_synonyms": ["本期"],
+                "forbidden_scoring_terms": ["總分"],
             },
             {
                 "full_section_heading_indexes": [2],
                 "forbidden_synonyms": ["本期", "本期"],
+                "forbidden_scoring_terms": ["總分"],
             },
         )
         for policy in bad_policies:
@@ -213,10 +262,6 @@ class ReportContractTests(unittest.TestCase):
             ]
             self.assertEqual(offenders, [], synonym)
 
-    def test_guidance_uses_contract_monetary_side_spelling(self):
-        self.assertNotIn("扣機側", self.guidance)
-        self.assertIn("`扳機側`", self.guidance)
-
     def test_macro_bindings_and_zero_result_policy_are_canonical(self):
         contract = self.contract
         bound_series = set()
@@ -247,104 +292,17 @@ class ReportContractTests(unittest.TestCase):
                 "structural.us_single_stock_etf",
             },
         )
-        for reason in contract["trigger_reason_codes"].values():
-            self.assertIn(reason["state"], contract["trigger_states"])
-            self.assertIn(reason["kind"], {"machine", "evidence"})
-            self.assertLessEqual(set(reason.get("source_ids", [])), source_ids)
 
-    def test_spv_deal_marker_shape_is_valid(self):
-        marker = self.contract["spv_deal_marker"]
-        source_ids = {source["id"] for source in self.contract["sources"]}
-        self.assertIn(marker["source_id"], source_ids)
+    def test_coverage_statuses_are_unique(self):
+        values = self.contract["coverage_statuses"]
+        self.assertEqual(len(values), len(set(values)))
+
+    def test_ndx_drawdown_source_is_bound_to_its_macro_block(self):
         source = next(
             item for item in self.contract["sources"]
-            if item["id"] == marker["source_id"]
-        )
-        self.assertEqual(source["window"], "composite")
-        self.assertIn(
-            marker["component_id"],
-            {item["id"] for item in source["window_components"]},
-        )
-        self.assertRegex(marker["tag"], r"^\[[a-z_]+\]$")
-        evidence_tags = {
-            reason["evidence_tag"]
-            for reason in self.contract["trigger_reason_codes"].values()
-            if reason["kind"] == "evidence"
-        }
-        self.assertNotIn(marker["tag"], evidence_tags)
-        self.assertTrue(marker["required_keys"])
-        self.assertTrue(all(
-            re.fullmatch(r"[a-z_]+", key) for key in marker["required_keys"]
-        ))
+            if item["id"] == "valuation.ndx_drawdown")
         self.assertEqual(
-            len(marker["required_keys"]), len(set(marker["required_keys"]))
-        )
-
-    def test_contract_rejects_spv_deal_marker_when_source_window_is_not_composite(self):
-        spec = importlib.util.spec_from_file_location(
-            "validate_report_spv_marker_composite_test", VALIDATOR_PATH
-        )
-        validator = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(validator)
-        contract = copy.deepcopy(self.contract)
-        marker = contract["spv_deal_marker"]
-        source = next(
-            item for item in contract["sources"] if item["id"] == marker["source_id"]
-        )
-        source["window"] = "30d"  # window_components deliberately left stale
-        failures = validator.Failures()
-        self.assertFalse(
-            validator.validate_contract(contract, failures), failures.items
-        )
-        self.assertTrue(any(
-            "composite" in message for message in failures.items
-        ), failures.items)
-
-    def test_contract_rejects_spv_deal_marker_on_non_event_component(self):
-        spec = importlib.util.spec_from_file_location(
-            "validate_report_spv_marker_component_test", VALIDATOR_PATH
-        )
-        validator = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(validator)
-        contract = copy.deepcopy(self.contract)
-        contract["spv_deal_marker"]["component_id"] = "quarterly_state"
-        failures = validator.Failures()
-        self.assertFalse(
-            validator.validate_contract(contract, failures), failures.items
-        )
-        self.assertTrue(any(
-            "30d" in message for message in failures.items
-        ), failures.items)
-
-    def test_contract_rejects_spv_deal_marker_with_empty_keywords(self):
-        spec = importlib.util.spec_from_file_location(
-            "validate_report_spv_marker_keywords_test", VALIDATOR_PATH
-        )
-        validator = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(validator)
-        contract = copy.deepcopy(self.contract)
-        contract["spv_deal_marker"]["keywords"] = []
-        failures = validator.Failures()
-        self.assertFalse(
-            validator.validate_contract(contract, failures), failures.items
-        )
-        self.assertTrue(any(
-            "keywords" in message for message in failures.items
-        ), failures.items)
-
-    def test_source_and_state_enums_are_unique(self):
-        for key in (
-            "anchors",
-            "regimes",
-            "trigger_states",
-            "monetary_sides",
-            "triangle_indicators",
-            "triangle_labels",
-            "historical_audit_labels",
-            "coverage_statuses",
-        ):
-            values = self.contract[key]
-            self.assertEqual(len(values), len(set(values)), key)
+            source["macro"]["components"], [{"kind": "block", "key": "ndx_drawdown"}])
 
 
 if __name__ == "__main__":
