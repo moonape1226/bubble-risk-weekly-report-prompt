@@ -267,10 +267,10 @@ async function runCase(input, ctx) {
   // that would prompt is denied (dontAsk). Write is governed by Edit(...) rules.
   const settings = {
     sandbox: { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true,
-               allowUnsandboxedCommands: false, network: { allowedDomains: [] }, filesystem: { allowWrite: [] } },
+               allowUnsandboxedCommands: false, network: { allowedDomains: [] }, filesystem: { allowWrite: [], denyRead: ['~/'] } },
     permissions: {
-      allow: ['Read', 'Glob', 'Grep', 'Edit(./report.md)', 'Edit(./forecast.json)', 'Bash(python3 scripts/validate_report.py:*)'],
-      deny: ['WebFetch', 'WebSearch', 'Edit(./scripts/**)', 'Edit(./case/**)', 'Edit(./.claude/**)',
+      allow: ['Read(./**)', 'Glob(./**)', 'Grep(./**)', 'Edit(./report.md)', 'Edit(./forecast.json)', 'Bash(python3 scripts/validate_report.py:*)'],
+      deny: ['WebFetch', 'WebSearch', 'Read(~/**)', 'Edit(./scripts/**)', 'Edit(./case/**)', 'Edit(./.claude/**)',
              'Edit(./bubble-risk-weekly-prompt.md)', 'Edit(./report_contract.json)'],
     },
   };
@@ -294,7 +294,14 @@ async function runCase(input, ctx) {
     ...readdirSync(join(CASE_ROOT, input.id)).map(f => [join(ws, 'case', f), join(CASE_ROOT, input.id, f), `case/${f}`])]
     .filter(([a, b]) => sha(a) !== sha(b)).map(x => x[2]);
   // ws/.claude is created by Claude Code itself under the sandbox; grading never reads ws, so it is not checked.
-  const read = f => { try { return readFileSync(join(ws, f), 'utf8'); } catch { return null; } };
+  // Outputs are read only as plain files: a symlink planted in the workspace
+  // (e.g. report.md -> ~/.env) would otherwise copy its target into out/ and the judge prompt.
+  const read = f => {
+    const st = lstatOrNull(join(ws, f));
+    if (!st) return null;
+    if (!st.isFile() || st.isSymbolicLink() || st.nlink > 1) { tampered.push(`${f} (not a regular file)`); return null; }
+    return readFileSync(join(ws, f), 'utf8');
+  };
   const report = read('report.md'), forecast = read('forecast.json');
   // keep the produced files next to the trace
   const odir = join(ctx.flow, ctx.variant, 'out', `${pathSafeId(input.id)}_rep${ctx.rep}`);
