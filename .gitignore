@@ -13,3 +13,4 @@ __pycache__/
 .claude/hillclimb/**/trajectory/
 .claude/hillclimb/**/*.bak
 .claude/hillclimb/forecast-judgment-canary-*/
+.claude/hillclimb/forecast-judgment-sandboxcheck/

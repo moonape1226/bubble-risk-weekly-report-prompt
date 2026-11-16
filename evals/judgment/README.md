@@ -10,6 +10,10 @@ Gates changes to `bubble-risk-weekly-prompt.md` / `report_contract.json` / `scri
 - `summarize.py` — set-level metrics into `<variant>/summary.json`.
 - `canary/run.sh` — judge sanity check: an "I don't know" report and a wrong-question report must both score low.
 
+## Isolation
+
+`evidence.md` is untrusted web-search text, so the model under test runs with `--permission-mode dontAsk` and Claude Code's Bash sandbox (writes confined to the temp workspace, no network, no unsandboxed fallback). File tools may write only `report.md` and `forecast.json`. Grading never reads the workspace except those two files: the validator runs from the repo against the repo's prompt, contract and case files in a fresh directory, and so does the judge. If the model changed any app or case file in its workspace copy, the row records `tampered` and `valid` is 0. The 2026-11-16 baseline ran before this lock-down (the model's Bash was effectively unrestricted); its 64 outputs were re-validated with the repo validator and case files and matched every recorded `valid`.
+
 ## Metrics
 
 Per case: `valid` (validator exit 0 on the final files), `first_pass` (the model's first validator call passed), `judgment` (share of applicable criteria passed by a Sonnet 5.5 judge: path_status, no_fabrication, both_sides, decision, gaps, flip), `yes`. Set level (`summarize.py`): yes rate, anchoring (flip case answer equals its replay twin's answer), rep agreement, answer changes across replay dates.

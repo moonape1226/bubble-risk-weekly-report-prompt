@@ -215,7 +215,7 @@ function parseStream(text, harnessMsg) {
   const events = text.split('\n').filter(l => l.trim()).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   const transcript = [];
   const init = events.find(e => e.type === 'system' && e.subtype === 'init');
-  transcript.push({ role: 'system', content: `Claude Code headless (claude -p) default system prompt.\ntools: ${(init?.tools ?? []).join(', ')}\nmcp_servers: ${JSON.stringify(init?.mcp_servers ?? [])}\nmodel: ${init?.model ?? '?'}` });
+  transcript.push({ role: 'system', content: `Claude Code headless (claude -p) default system prompt.\ntools: ${(init?.tools ?? []).join(', ')}\nmcp_servers: ${JSON.stringify(init?.mcp_servers ?? [])}\nmodel: ${init?.model ?? '?'}\npermissionMode: ${init?.permissionMode ?? '?'}` });
   transcript.push({ role: 'user', content: harnessMsg });
   const modelCounts = {};
   let lastStop = null, pendingThinking = null;
@@ -261,10 +261,23 @@ async function runCase(input, ctx) {
   for (const f of APP_FILES) cpSync(join(REPO, f), join(ws, f), { recursive: true });
   cpSync(join(CASE_ROOT, input.id), join(ws, 'case'), { recursive: true });
   const msg = harnessMessage(input);
+  // The model reads untrusted web-search text (evidence.md), so its tools are confined:
+  // Bash runs only inside the OS sandbox (writes limited to the workspace, no network,
+  // no unsandboxed fallback); file tools may write only the two output files; anything
+  // that would prompt is denied (dontAsk). Write is governed by Edit(...) rules.
+  const settings = {
+    sandbox: { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true,
+               allowUnsandboxedCommands: false, network: { allowedDomains: [] }, filesystem: { allowWrite: [] } },
+    permissions: {
+      allow: ['Read', 'Glob', 'Grep', 'Edit(./report.md)', 'Edit(./forecast.json)', 'Bash(python3 scripts/validate_report.py:*)'],
+      deny: ['WebFetch', 'WebSearch', 'Edit(./scripts/**)', 'Edit(./case/**)', 'Edit(./.claude/**)',
+             'Edit(./bubble-risk-weekly-prompt.md)', 'Edit(./report_contract.json)'],
+    },
+  };
   const args = ['-p', '--model', ctx.model, '--output-format', 'stream-json', '--verbose',
     '--setting-sources', 'project', '--strict-mcp-config', '--no-session-persistence',
-    '--tools', 'Bash,Read,Write,Edit,Glob,Grep',
-    '--allowedTools', 'Bash(python3 scripts/validate_report.py:*)', 'Read', 'Write', 'Edit', 'Glob', 'Grep'];
+    '--permission-mode', 'dontAsk', '--settings', JSON.stringify(settings),
+    '--tools', 'Bash,Read,Write,Edit,Glob,Grep'];
   const timeoutMs = ctx.timeoutS > 0 ? (ctx.timeoutS - 120) * 1000 : 0;
   const { code, out, err } = await runClaude(args, { cwd: ws, input: msg, timeoutMs });
   const p = parseStream(out, msg);
@@ -274,6 +287,13 @@ async function runCase(input, ctx) {
     e.model = p.model; e.usage = usageOf(p.result?.usage);
     throw e;
   }
+  // The workspace is model-writable: grading never runs or reads anything from it
+  // except report.md / forecast.json. Record any change to the app or case files.
+  const sha = f => { try { return createHash('sha256').update(readFileSync(f)).digest('hex'); } catch { return null; } };
+  const tampered = [...APP_FILES.map(f => [join(ws, f), join(REPO, f), f]),
+    ...readdirSync(join(CASE_ROOT, input.id)).map(f => [join(ws, 'case', f), join(CASE_ROOT, input.id, f), `case/${f}`])]
+    .filter(([a, b]) => sha(a) !== sha(b)).map(x => x[2]);
+  // ws/.claude is created by Claude Code itself under the sandbox; grading never reads ws, so it is not checked.
   const read = f => { try { return readFileSync(join(ws, f), 'utf8'); } catch { return null; } };
   const report = read('report.md'), forecast = read('forecast.json');
   // keep the produced files next to the trace
@@ -291,6 +311,7 @@ async function runCase(input, ctx) {
     model: p.model, usage: usageOf(p.result.usage), stop_reason: p.lastStop ?? p.result.subtype,
     status: p.lastStop === 'max_tokens' ? 'truncated' : 'ok',
     cli_cost_usd: p.result.total_cost_usd ?? null, num_turns: p.result.num_turns ?? null,
+    tampered,
     validator_runs: p.validatorRuns, first_pass: p.validatorResults[0] === true ? 1 : 0, refused: refused ? 1 : 0,
   };
 }
@@ -313,12 +334,16 @@ const CRITERIA = ['path_status', 'no_fabrication', 'both_sides', 'decision', 'ga
 const JUDGE_SCHEMA = { type: 'object', additionalProperties: false, required: CRITERIA,
   properties: Object.fromEntries(CRITERIA.map(k => [k, VERDICT])) };
 
-function runValidator(ws, c) {
+// Runs the repo's validator on copies of the two output files in a clean directory,
+// against the repo's prompt, contract and case files (never the model's workspace copies).
+function runValidator(gdir, c) {
   return new Promise(res => {
-    const args = ['scripts/validate_report.py', 'report.md', '--current-forecast', 'forecast.json',
-      '--prompt', 'bubble-risk-weekly-prompt.md', '--contract', 'report_contract.json',
-      '--macro-json', 'case/macro.txt', ...priorFlag(c).split(' '), '--dry-run'];
-    const ch = spawn('python3', args, { cwd: ws });
+    const cdir = join(CASE_ROOT, c.id);
+    const prior = c.prior_kind === 'forecast-yes' ? ['--prior-forecast', join(cdir, 'prior_forecast.json')] : ['--no-prior-forecast'];
+    const args = ['-I', join(REPO, 'scripts/validate_report.py'), join(gdir, 'report.md'), '--current-forecast', join(gdir, 'forecast.json'),
+      '--prompt', join(REPO, 'bubble-risk-weekly-prompt.md'), '--contract', join(REPO, 'report_contract.json'),
+      '--macro-json', join(cdir, 'macro.txt'), ...prior, '--dry-run'];
+    const ch = spawn('python3', args, { cwd: gdir });
     let out = '';
     ch.stdout.on('data', d => { out += d; }); ch.stderr.on('data', d => { out += d; });
     ch.on('close', code => res({ code, out }));
@@ -331,30 +356,36 @@ async function gradeCase(input, run, ref, ctx) {
     return { grade: { valid: 0, first_pass: 0, judgment: 0, yes: 0 },
              explanation: { valid: 'report.md missing or empty', judgment: 'report.md missing or empty (judge not called)' } };
   }
-  const v = run.output != null && run.forecast != null ? await runValidator(run.ws, input) : { code: -1, out: 'report.md or forecast.json missing' };
+  rmSync(run.ws, { recursive: true, force: true });
+  const gdir = mkdtempSync(join(tmpdir(), `brw-grade-${input.id}-`));
+  writeFileSync(join(gdir, 'report.md'), run.output);
+  if (run.forecast != null) writeFileSync(join(gdir, 'forecast.json'), run.forecast);
+  let v = run.forecast != null ? await runValidator(gdir, input) : { code: -1, out: 'forecast.json missing' };
+  if (run.tampered.length) v = { code: -2, out: `workspace app/case files modified by the model: ${run.tampered.join(', ')}\n${v.out}` };
   let answer = null;
   try { answer = JSON.parse(run.forecast ?? 'null')?.answer ?? null; } catch { /* stays null */ }
   const inputs = ['prior.json', 'prior_forecast.json', 'evidence.md', 'macro.txt']
-    .map(f => { try { return `--- case/${f} ---\n` + readFileSync(join(run.ws, 'case', f), 'utf8'); } catch { return null; } })
+    .map(f => { try { return `--- case/${f} ---\n` + readFileSync(join(CASE_ROOT, input.id, f), 'utf8'); } catch { return null; } })
     .filter(Boolean).join('\n\n');
   const judgeInput = `Execution date: ${input.run_date}. Prior: ${input.prior_date} (${input.prior_kind}).\n<inputs>\n${inputs}\n</inputs>\n\n<report>\n${run.output ?? '(no report produced)'}\n</report>`;
-  const j = await runClaude(['-p', '--model', JUDGE_MODEL, '--output-format', 'json', '--tools', '',
+  const j = await runClaude(['-p', '--model', JUDGE_MODEL, '--output-format', 'json', '--tools', '', '--permission-mode', 'dontAsk',
     '--setting-sources', 'project', '--strict-mcp-config', '--no-session-persistence',
     '--system-prompt', JUDGE_SYSTEM, '--json-schema', JSON.stringify(JUDGE_SCHEMA)],
-    { cwd: run.ws, input: judgeInput, timeoutMs: 600000 });
+    { cwd: gdir, input: judgeInput, timeoutMs: 600000 });
   let jr = null; try { jr = JSON.parse(j.out); } catch { /* handled below */ }
   const verdicts = jr?.structured_output ?? (() => { try { return JSON.parse(jr?.result ?? ''); } catch { return null; } })();
   const judge_usage = usageOf(jr?.usage);
   const judge_model = jr?.modelUsage ? Object.keys(jr.modelUsage).find(m => m.startsWith(JUDGE_MODEL)) ?? JUDGE_MODEL : JUDGE_MODEL;
   if (!verdicts || CRITERIA.some(k => !verdicts[k])) {
     const e = new Error(`judge output unparsable (exit ${j.code})`);
+    rmSync(gdir, { recursive: true, force: true });
     e.failure_class = 'grader'; e.judge_model = judge_model; e.judge_usage = judge_usage;
     throw e;
   }
   const applicable = CRITERIA.filter(k => verdicts[k].verdict !== 'na');
   const passed = applicable.filter(k => verdicts[k].verdict === 'pass').length;
   run.judge_cost_usd = jr?.total_cost_usd ?? null;
-  rmSync(run.ws, { recursive: true, force: true });
+  rmSync(gdir, { recursive: true, force: true });
   return {
     grade: { valid: v.code === 0 ? 1 : 0, first_pass: run.first_pass,
              judgment: applicable.length ? passed / applicable.length : 1, yes: answer === 'yes' ? 1 : 0 },
@@ -371,7 +402,7 @@ async function gradeCase(input, run, ref, ctx) {
 function perfFrom(run) {
   return {
     cli_cost_usd: run.cli_cost_usd == null ? null : run.cli_cost_usd + (run.judge_cost_usd ?? 0),
-    validator_runs: run.validator_runs, num_turns: run.num_turns, refused: run.refused,
+    validator_runs: run.validator_runs, num_turns: run.num_turns, refused: run.refused, tampered: run.tampered?.length ?? 0,
     in_tokens: (run.usage?.input_tokens ?? 0) + (run.usage?.cache_read_input_tokens ?? 0) + (run.usage?.cache_creation_input_tokens ?? 0),
     out_tokens: run.usage?.output_tokens ?? 0,
   };
