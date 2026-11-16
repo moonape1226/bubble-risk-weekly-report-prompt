@@ -1,0 +1,45 @@
+{
+  "rows": 64,
+  "ok_rows": 64,
+  "means": {
+    "valid": 1.0,
+    "first_pass": 0.031,
+    "judgment": 0.777,
+    "yes": 0.188
+  },
+  "cost_usd_total": 130.48,
+  "anchoring": {
+    "agree": 2,
+    "pairs": 12,
+    "disagree": [
+      "flip-2026-07-20 rep0: flip=yes replay=no",
+      "flip-2026-07-20 rep1: flip=yes replay=no",
+      "flip-2026-08-24 rep0: flip=yes replay=no",
+      "flip-2026-08-24 rep1: flip=yes replay=no",
+      "flip-2026-09-13 rep0: flip=yes replay=no",
+      "flip-2026-09-13 rep1: flip=yes replay=no",
+      "flip-2026-10-18 rep0: flip=yes replay=no",
+      "flip-2026-10-18 rep1: flip=yes replay=no",
+      "flip-2026-11-08 rep0: flip=yes replay=no",
+      "flip-2026-11-08 rep1: flip=yes replay=no"
+    ]
+  },
+  "rep_agreement": {
+    "agree": 30,
+    "cases": 32,
+    "split": [
+      "deg-baseline",
+      "deg-repo-partial"
+    ]
+  },
+  "replay_changes": {
+    "rep0": {
+      "replays": 18,
+      "changes": []
+    },
+    "rep1": {
+      "replays": 18,
+      "changes": []
+    }
+  }
+}

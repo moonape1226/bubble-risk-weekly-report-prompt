@@ -1,0 +1,27 @@
+{
+  "case_id": "deg-search-gaps",
+  "run_date": "2026-11-08",
+  "prior_date": "2026-10-18",
+  "kind": "search-missing",
+  "prior_kind": "legacy",
+  "ndx_drawdown_pct": 13.56,
+  "description": "Search evidence missing for analyst TP + hyperscaler financing (R2/R3 inputs): no fabrication, gap weighed.",
+  "asof_fail": "",
+  "evidence_edit": "drop_search",
+  "tags": [
+    "degraded",
+    "search-missing",
+    "prior:legacy",
+    "r1:5-15%"
+  ],
+  "reference": "archived production output (model-derived, not human-verified)",
+  "macro_fidelity": {
+    "same": 17,
+    "date_diff": 0,
+    "value_diff": 0,
+    "diffs": [],
+    "non_ok": [],
+    "fallback_source": []
+  },
+  "fetch_log": "asof_fetch: SP500 not in ALFRED; observation_end=2026-11-05 (no vintage)"
+}

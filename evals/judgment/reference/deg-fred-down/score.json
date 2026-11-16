@@ -1,0 +1,23 @@
+{
+  "date": "2026-11-08",
+  "iso_week": "2026-W45",
+  "weekday": "Sunday",
+  "timezone": "Asia/Taipei",
+  "valuation": 75,
+  "breadth": 48,
+  "speculation": 32,
+  "retail": 28,
+  "monetary": 82,
+  "structural": 82,
+  "total": 61,
+  "tier": "警戒",
+  "regime": "穩定共存",
+  "trigger_state": "已擊發",
+  "trigger_reasons": [
+    "refinancing_credit_event",
+    "hy_streak"
+  ],
+  "monetary_side": "扳機側",
+  "hy_oas_widening_streak": 4,
+  "sp500_dev200_pct": 0.42
+}

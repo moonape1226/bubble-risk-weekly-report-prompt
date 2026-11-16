@@ -1,0 +1,31 @@
+{
+  "case_id": "deg-repo-partial",
+  "run_date": "2026-11-08",
+  "prior_date": "2026-10-18",
+  "kind": "repo-partial",
+  "prior_kind": "legacy",
+  "ndx_drawdown_pct": 13.56,
+  "description": "repo_stress keeps only usable legs; composite `all` aggregation unsatisfied; funding-stress evidence partial.",
+  "asof_fail": "SOFR99,RPONTTLD",
+  "evidence_edit": null,
+  "tags": [
+    "degraded",
+    "repo-partial",
+    "prior:legacy",
+    "r1:5-15%"
+  ],
+  "reference": "archived production output (model-derived, not human-verified)",
+  "macro_fidelity": {
+    "same": 15,
+    "date_diff": 0,
+    "value_diff": 0,
+    "diffs": [],
+    "non_ok": [
+      "RPONTTLD",
+      "SOFR99",
+      "repo_stress"
+    ],
+    "fallback_source": []
+  },
+  "fetch_log": "asof_fetch: SP500 not in ALFRED; observation_end=2026-11-05 (no vintage)"
+}

@@ -1,0 +1,26 @@
+{
+  "case_id": "flip-2026-11-08",
+  "run_date": "2026-11-08",
+  "prior_date": "2026-10-18",
+  "kind": "flip",
+  "prior_kind": "forecast-yes",
+  "ndx_drawdown_pct": 13.56,
+  "description": "Replay with a synthetic forecast prior answering yes on 2026-10-18: keep it, or flip only with cited evidence dated after the prior run.",
+  "asof_fail": "",
+  "evidence_edit": null,
+  "tags": [
+    "flip",
+    "prior:forecast-yes",
+    "r1:5-15%"
+  ],
+  "reference": "archived production output (model-derived, not human-verified)",
+  "macro_fidelity": {
+    "same": 17,
+    "date_diff": 0,
+    "value_diff": 0,
+    "diffs": [],
+    "non_ok": [],
+    "fallback_source": []
+  },
+  "fetch_log": "asof_fetch: SP500 not in ALFRED; observation_end=2026-11-05 (no vintage)"
+}

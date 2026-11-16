@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-03",
+  "iso_week": "2026-W36",
+  "weekday": "Thursday",
+  "timezone": "Asia/Taipei",
+  "question_version": 1,
+  "resolution_version": 1,
+  "answer": "no",
+  "horizon_end": "2027-03-04",
+  "prior_date": "2026-08-31",
+  "prior_answer": null,
+  "flip_evidence": [],
+  "r1_drawdown_pct": 4.95,
+  "resolution": null
+}
