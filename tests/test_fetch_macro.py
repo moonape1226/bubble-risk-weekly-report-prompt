@@ -41,6 +41,42 @@ class PriorValidation(unittest.TestCase):
         self.assertEqual(self._run(future_day), 2)
 
 
+class FutureDatedObservations(unittest.TestCase):
+    """FRED posts some series ahead of their observation date (IORB for the
+    next business day). The 2026-11-15 Sunday run received a 2026-11-16 IORB
+    print, so latest_date fell after generated_at and the validator failed
+    closed. Observations after the Asia/Taipei execution date are dropped and
+    every FRED query is bounded by observation_end."""
+
+    NOW = fm.datetime(2026, 11, 15, 9, 8, tzinfo=fm.TAIPEI_TZ)
+
+    def setUp(self):
+        fm.OBS_CACHE.clear()
+
+    def test_fred_obs_drops_observation_after_execution_date(self):
+        payload = {"observations": [
+            {"date": "2026-11-16", "value": "3.9"},
+            {"date": "2026-11-15", "value": "3.9"},
+            {"date": "2026-11-14", "value": "3.9"},
+        ]}
+        with mock.patch.object(fm, "execution_now", return_value=self.NOW), \
+             mock.patch.object(fm, "PRIOR", "2026-11-08"), \
+             mock.patch.object(fm, "_get", return_value=json.dumps(payload)) as get:
+            obs = fm.fred_obs("IORB")
+        self.assertEqual(obs[0], ("2026-11-15", 3.9))
+        self.assertNotIn("2026-11-16", [day for day, _ in obs])
+        self.assertIn("&observation_end=2026-11-15&", get.call_args.args[0])
+
+    def test_sp500_and_ndx_queries_are_bounded_by_execution_date(self):
+        empty = json.dumps({"observations": []})
+        for fetch in (fm.sp500_trend, fm.ndx_drawdown):
+            with self.subTest(fetch=fetch.__name__), \
+                 mock.patch.object(fm, "execution_now", return_value=self.NOW), \
+                 mock.patch.object(fm, "_get", return_value=empty) as get:
+                fetch()
+            self.assertIn("&observation_end=2026-11-15&", get.call_args.args[0])
+
+
 class FredMalformedPayload(unittest.TestCase):
     """An upstream FRED schema error degrades one series instead of aborting
     construction of the complete macro artifact."""
