@@ -113,8 +113,14 @@ def canonical_observations(observations):
     for one date make alignment and delta selection ambiguous and are treated
     as an upstream schema/data failure.
     """
+    # Some series are published ahead of their observation date (FRED posts
+    # IORB for the next business day), so a weekend run would otherwise emit a
+    # latest_date after generated_at, which the validator rejects.
+    today = execution_now().strftime("%Y-%m-%d")
     by_date = {}
     for day, value in observations:
+        if day > today:
+            continue
         if day in by_date and by_date[day] != value:
             raise ValueError(f"conflicting observations for {day}")
         by_date[day] = value
@@ -136,7 +142,8 @@ def fred_obs(series_id):
         start = (datetime.strptime(PRIOR, "%Y-%m-%d") - timedelta(days=lookback)).strftime("%Y-%m-%d")
     url = ("https://api.stlouisfed.org/fred/series/observations"
            f"?series_id={series_id}&api_key={FRED_KEY}&file_type=json"
-           f"&observation_start={start}&sort_order=desc")
+           f"&observation_start={start}"
+           f"&observation_end={execution_now():%Y-%m-%d}&sort_order=desc")
     data = json.loads(_get(url))
     if not isinstance(data, dict) or not isinstance(data.get("observations"), list):
         raise ValueError("FRED observations is not an array")
@@ -371,7 +378,8 @@ def sp500_trend():
     start = (datetime.now(timezone.utc) - timedelta(days=600)).strftime("%Y-%m-%d")
     url = ("https://api.stlouisfed.org/fred/series/observations"
            f"?series_id=SP500&api_key={FRED_KEY}&file_type=json"
-           f"&observation_start={start}&sort_order=desc")
+           f"&observation_start={start}"
+           f"&observation_end={execution_now():%Y-%m-%d}&sort_order=desc")
     try:
         data = json.loads(_get(url))
         raw_observations = data.get("observations", [])
@@ -437,7 +445,8 @@ def ndx_drawdown():
     start = (datetime.now(timezone.utc) - timedelta(days=cfg["fetch_back_days"])).strftime("%Y-%m-%d")
     url = ("https://api.stlouisfed.org/fred/series/observations"
            f"?series_id={sid}&api_key={FRED_KEY}&file_type=json"
-           f"&observation_start={start}&sort_order=desc")
+           f"&observation_start={start}"
+           f"&observation_end={execution_now():%Y-%m-%d}&sort_order=desc")
     try:
         data = json.loads(_get(url))
         raw_observations = data.get("observations", [])
