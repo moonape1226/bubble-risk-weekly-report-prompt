@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+# Canary shim: fakes the model-under-test call with a fixed bad report and
+# passes judge calls (those with --json-schema) through to the real claude.
+import json, os, sys, shutil
+args = sys.argv[1:]
+if '--json-schema' in args:
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.pathsep.join(p for p in os.environ['PATH'].split(os.pathsep) if os.path.abspath(p) != here)
+    real = shutil.which('claude', path=path)
+    os.execv(real, [real] + args)
+sys.stdin.read()
+kind = os.environ['CANARY']
+src = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', f'{kind}.md')
+shutil.copy(src, 'report.md')
+open('forecast.json', 'w').write(json.dumps({'answer': 'no'}))
+m = 'claude-opus-5-5'
+for e in [{'type': 'system', 'subtype': 'init', 'tools': [], 'mcp_servers': [], 'model': m},
+          {'type': 'assistant', 'message': {'model': m, 'content': [{'type': 'text', 'text': f'[canary {kind}]'}], 'stop_reason': 'end_turn'}},
+          {'type': 'result', 'subtype': 'success', 'usage': {'input_tokens': 1, 'output_tokens': 1}, 'total_cost_usd': 0, 'num_turns': 1}]:
+    print(json.dumps(e))

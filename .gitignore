@@ -3,3 +3,14 @@ report.md
 .env.*
 *.key
 __pycache__/
+
+# eval (evals/judgment, .claude/hillclimb): keep inputs, runner and graded outputs; drop bulk and derived files
+!evals/**/report.md
+!.claude/hillclimb/**/report.md
+**/traces/
+.claude/hillclimb/**/report.html
+.claude/hillclimb/**/state.json
+.claude/hillclimb/**/trajectory/
+.claude/hillclimb/**/*.bak
+.claude/hillclimb/forecast-judgment-canary-*/
+.claude/hillclimb/forecast-judgment-sandboxcheck/

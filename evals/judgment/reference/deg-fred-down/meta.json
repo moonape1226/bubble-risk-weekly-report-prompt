@@ -1,0 +1,56 @@
+{
+  "case_id": "deg-fred-down",
+  "run_date": "2026-11-08",
+  "prior_date": "2026-10-18",
+  "kind": "fred-down",
+  "prior_kind": "legacy",
+  "ndx_drawdown_pct": null,
+  "description": "FRED key unusable: all FRED series fail incl. NASDAQ100, so R1 is unavailable; Treasury/EIA fallbacks only.",
+  "asof_fail": "ALL_FRED",
+  "evidence_edit": null,
+  "tags": [
+    "degraded",
+    "fred-down",
+    "prior:legacy",
+    "r1:unavailable"
+  ],
+  "reference": "archived production output (model-derived, not human-verified)",
+  "macro_fidelity": {
+    "same": 1,
+    "date_diff": 3,
+    "value_diff": 0,
+    "diffs": [
+      "DGS10 run=2026-11-05 replay=2026-11-06",
+      "DFII10 run=2026-11-05 replay=2026-11-06",
+      "DCOILWTICO run=2026-11-03 replay=2026-11-06"
+    ],
+    "non_ok": [
+      "BAMLC0A0CM",
+      "BAMLH0A0HYM2",
+      "BOGZ1FL153064486Q",
+      "CPIAUCSL",
+      "DFEDTARL",
+      "DFEDTARU",
+      "ECBASSETSW",
+      "IORB",
+      "JPNASSETS",
+      "LNFACBW027SBOG",
+      "RPONTTLD",
+      "SOFR",
+      "SOFR99",
+      "T5YIFR",
+      "THREEFYTP10",
+      "VIXCLS",
+      "WALCL",
+      "sp500_trend",
+      "repo_stress",
+      "vix_spx_comove"
+    ],
+    "fallback_source": [
+      "DCOILWTICO",
+      "DFII10",
+      "DGS10"
+    ]
+  },
+  "fetch_log": ""
+}

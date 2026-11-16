@@ -1,0 +1,27 @@
+{
+  "case_id": "deg-zero-screens",
+  "run_date": "2026-08-13",
+  "prior_date": "2026-08-10",
+  "kind": "zero-result",
+  "prior_kind": "legacy",
+  "ndx_drawdown_pct": 2.99,
+  "description": "Eligible zero-result screens completed with zero hits: success, not NOT DISCLOSED.",
+  "asof_fail": "",
+  "evidence_edit": "zero_screens",
+  "tags": [
+    "degraded",
+    "zero-result",
+    "prior:legacy",
+    "r1:<5%"
+  ],
+  "reference": "archived production output (model-derived, not human-verified)",
+  "macro_fidelity": {
+    "same": 7,
+    "date_diff": 0,
+    "value_diff": 0,
+    "diffs": [],
+    "non_ok": [],
+    "fallback_source": []
+  },
+  "fetch_log": "asof_fetch: SP500 not in ALFRED; observation_end=2026-08-12 (no vintage)"
+}

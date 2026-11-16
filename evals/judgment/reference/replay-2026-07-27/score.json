@@ -1,0 +1,22 @@
+{
+  "date": "2026-07-27",
+  "iso_week": "2026-W31",
+  "weekday": "Monday",
+  "timezone": "Asia/Taipei",
+  "valuation": 78,
+  "breadth": 30,
+  "speculation": 58,
+  "retail": 48,
+  "monetary": 75,
+  "structural": 78,
+  "total": 64,
+  "tier": "警戒",
+  "regime": "穩定共存",
+  "trigger_state": "已擊發",
+  "trigger_reasons": [
+    "private_credit_gate"
+  ],
+  "monetary_side": "扳機側",
+  "hy_oas_widening_streak": 0,
+  "sp500_dev200_pct": 5.8
+}

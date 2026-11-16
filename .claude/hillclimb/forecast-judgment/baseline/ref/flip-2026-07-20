@@ -1,0 +1,243 @@
+> [DRY RUN] this report was not committed to archive.
+
+# 2026-07-20 AI 泡沫破裂預測報告
+報告日期：2026-07-20｜ISO 週次：2026-W30｜預測窗口：2026-07-20 → 2027-01-18｜前次基準：report-2026-07-16（4天前）
+
+## 結論
+
+**結論：no**
+
+本次首次取得 R1 的量化距離：NASDAQ-100 於 2026-07-17 收 28,592.66，距 52 週高點回撤 6.74%，須再跌約 19.58% 才觸及 R1 門檻，而 HY OAS 2.71%、IG OAS 0.78% 顯示信用市場尚未重定價（`valuation.ndx_drawdown`、`monetary.hy_oas`）。R2 方面 hyperscaler capex 指引仍在上修，R3 方面 CoreWeave CDS 雖已擴至約 665bp，但無付款違約或 distressed exchange 跡象（`ai.hyperscaler_capex`、`valuation.ai_credit_schism`）；相對於基準率，三條路徑都沒有在 182 天內完成的具體證據。
+
+## 解析條件
+
+**問題：** 自報告日起 182 天內，AI 泡沫是否破裂？
+
+窗口內以下任一條件成立即解析為 yes，否則為 no：
+
+- **R1 市場回撤：** FRED `NASDAQ100` 任一日收盤 ≤ 該日（含）之前 252 個交易日最高收盤 × 0.75，即自 52 週高點回撤 ≥ 25%。
+- **R2 資本支出收縮：** Microsoft、Alphabet、Amazon、Meta 四家之中至少兩家，在財報、法說會或 8-K 中將當年度或次年度資本支出指引下修（相較該公司前一次正式指引）。
+- **R3 AI 信用事件：** 以 AI 資料中心／算力為主業、負債 ≥ 50 億美元的借款人，發生破產申請、超過寬限期的付款違約，或完成 distressed exchange。
+
+解析版本：v1
+
+## 三條路徑現況
+
+### R1 市場回撤
+
+NASDAQ-100 最新收盤 28,592.66（2026-07-17），252 個交易日最高收盤 30,660.60（2026-06-02），距 52 週高點回撤 6.74%（`valuation.ndx_drawdown`）。R1 門檻水位為 22,995.45，自最新收盤須再下跌約 19.58% 才觸及。近期跌勢有實際動能：07-17 單日由 29,025.77 跌至 28,592.66，NYSE 當日下跌家數約為上漲的 2 倍、伴隨晶片股賣壓（`breadth.advance_decline`）；VIX 在 07-10 → 07-17 的 7 日窗口內由 15.03 升至 18.77（+24.88%），同期 S&P 500 −1.55%，屬正常的股跌波動升，非 crowded-optionality 共振（`structural.vix_spx_comove`）。脆弱度仍高：S&P 500 trailing P/E 32.08、Shiller CAPE 41.52（`valuation.sp500_pe_cape`），S&P 500 高於 200 日均線 6.73%（`valuation.sp500_trend`），margin debt $1.416T、YoY +53.7%（`retail.margin_debt`），NAAIM 95.64（`retail.naaim`）。但同時 CNN Fear & Greed 已落至 37（Fear）（`retail.fear_greed`），情緒並非極端貪婪。
+
+**判讀：** R1 尚遠：25% 回撤需要在現有約 7% 回撤之上再跌近兩成，通常需要信用重定價、資金面失序或 capex 指引轉向等觸發器；目前 HY OAS 2.71% 與 repo 資金壓力（SOFR−IORB −3bp）都未顯示傳導，若窗口內出現 hyperscaler 下修指引或 AI 信用事件，槓桿（margin debt YoY +53.7%）可能放大跌勢而把 R1 推過門檻。
+
+### R2 資本支出收縮
+
+本次證據僅有 hyperscaler 合計層級的指引：2026 年 hyperscaler capex 合計約 $700B，且仍在上修（資料日 2026-05-15，對應 2026 Q1 財報季）（`ai.hyperscaler_capex`）。依此，Microsoft、Alphabet、Amazon、Meta 四家相較前一次正式指引的方向皆為上修或持平，目前下修家數為 0／4；本次證據未逐家列出具體金額。需求側也未見放緩：伺服器 DRAM 3Q26 合約價預估 +13–18% QoQ（`ai.compute_supply_demand`），Anthropic run-rate 約 $47B、OpenAI 約 $25B（`ai.openai_anthropic_revenue`）。下一次財報的具體日期不在本次證據內；2026 Q2 與 Q3 兩個財報季都落在窗口內，是 R2 的主要觸發節點。
+
+**判讀：** R2 距離解析最遠：需要四家中兩家在窗口內兩個財報季轉為下修，而最新方向仍是上修；只有在 R1 大幅回撤或 AI 營收對 capex 缺口（年化 capex 約 $700B vs AI 終端營收數百億美元級，`ai.revenue_capex_gap`）迫使管理層收縮時才可能成立。
+
+### R3 AI 信用事件
+
+AI 信用定價出現分化：Oracle 5 年期 CDS 約 198bp、創紀錄，CoreWeave CDS 約 665bp（2026-07-16）（`valuation.ai_credit_schism`）。符合 R3 規模門檻（負債 ≥ 50 億美元且以 AI 資料中心／算力為主業）的借款人中，CoreWeave 是最直接的候選；Oracle 負債規模雖大，但主業並非 AI 資料中心，未必符合 R3 定義。CoreWeave 約 665bp 屬壓力區間但尚未到典型 distressed 水準，本次證據內沒有付款違約、covenant waiver、distressed exchange 或 going-concern 字樣，也沒有近期到期／再融資牆的具體披露。外圍非銀流動性有壓力：Blue Owl OCIC 2026 Q2 redemption-request ratio 18.8%，於 5% quarterly redemption cap 下 gate proration / breach（2026-07-02）（`monetary.private_credit_liquidity`），但整體 HY OAS 僅 2.71%（`monetary.hy_oas`），銀行對 NBFI 放款 2,004.0237（$2.00T）持平（`structural.nbfi_bank_loans`）。
+
+**判讀：** R3 是三條中最接近「已有壓力訊號」的路徑：CoreWeave CDS 已反映有意義的違約風險，私募信貸出現 gate proration / breach；但要在 182 天內完成破產、逾寬限期違約或 distressed exchange，還需要融資管道實際關閉，目前信用大盤利差緊、repo 平穩，尚無此跡象。
+
+## 支持 yes 的證據
+
+- [R3] Oracle 5 年期 CDS 約 198bp 創紀錄、CoreWeave CDS 約 665bp（2026-07-16），AI 信用定價分歧（equity-vs-credit schism）中信用端已開始重定價（`valuation.ai_credit_schism`）
+- [R3] Blue Owl OCIC 2026 Q2 redemption-request ratio 18.8%，在 5% quarterly redemption cap 下 gate proration / breach（2026-07-02），私募信貸贖回壓力（private-credit / non-bank fund liquidity stress）是 AI 基礎設施融資鏈的上游風險（`monetary.private_credit_liquidity`）
+- [R1] 槓桿與擁擠度處於歷史頂部區：margin debt $1.416T、YoY +53.7%（2026-05 月資料），NAAIM 95.64（2026-07-15），Shiller CAPE 41.52（2026-07-17）（`retail.margin_debt`、`retail.naaim`、`valuation.sp500_pe_cape`）
+- [R1] 跌勢已經開始：NASDAQ-100 自 2026-06-02 高點 30,660.60 回落至 28,592.66（2026-07-17），07-17 NYSE 下跌家數約為上漲的 2 倍、伴隨晶片股賣壓，VIX 一週升 24.88% 至 18.77（`valuation.ndx_drawdown`、`breadth.advance_decline`、`structural.vix_spx_comove`）
+- [整體] 投機熱度高：Anthropic 以約 $965B 估值進行 IPO 投資人會議、可能 10 月掛牌（2026-07-15），EVTV 改名 Azio AI（2026-07-13），US 槓桿 ETF 總 AUM 約 $198B（`speculation.upcoming_ai_ipos`、`speculation.ai_rename_spac`、`structural.leveraged_etf_aum`）
+
+## 支持 no 的證據
+
+- [R1] NASDAQ-100 距 52 週高點回撤 6.74%（2026-07-17），R1 門檻水位 22,995.45，須再跌約 19.58%（`valuation.ndx_drawdown`）
+- [R2] hyperscaler 2026 capex 合計約 $700B 且仍在上修（2026-05-15），四家中下修家數為 0（`ai.hyperscaler_capex`）
+- [整體] 信用大盤未重定價：HY OAS 2.71%、IG OAS 0.78%（2026-07-16），與 R1／R3 所需的信用傳導相距甚遠（`monetary.hy_oas`、`monetary.ig_oas`）
+- [整體] 資金面平穩：repo 資金壓力（SOFR−IORB）為 −3bp、SOFR99−IORB 5bp（2026-07-16），SRF 動用（Standing Repo Facility usage）0（2026-07-17），MOVE 70.88（`monetary.repo_stress_srf`、`structural.treasury_basis_trade`）
+- [R2] AI 需求側仍強：伺服器 DRAM 3Q26 合約價 +13–18% QoQ（2026-07-03），Anthropic run-rate 約 $47B、OpenAI 約 $25B（`ai.compute_supply_demand`、`ai.openai_anthropic_revenue`）
+
+## 與前期比較
+
+前次結論：yes（report-2026-07-16）
+本次結論：翻轉
+翻轉依據：
+- `valuation.ndx_drawdown`（資料日 2026-07-17）：前次預測的 r1_drawdown_pct 為 null，R1 路徑當時沒有量化距離；本次腳本首次產出 252 日窗口證明，NASDAQ-100 距 52 週高點回撤 6.74%，R1 門檻水位 22,995.45，須再跌約 19.58%。這把 R1 從「距離未知」改為「距離約兩成」，在 R2 指引仍上修、R3 尚無違約跡象的情況下，沒有任何一條路徑在窗口內完成的可能性高於一半，因此改判 no。
+
+同時需要說明，前次報告日後的新資料方向並非一致偏向 no：07-17 晶片股賣壓、NYSE 下跌家數約為上漲的 2 倍、VIX 一週升 24.88%，都屬 R1 方向的不利訊號；它們已計入上面的判讀，但幅度不足以抵銷 R1 約兩成的剩餘距離。HY OAS 與 hyperscaler capex 兩項的資料日沒有晚於前次報告日，只作為延續狀態引用，不列入翻轉依據。
+
+## 資料缺漏與不確定性
+
+FETCH FAILED 來源：
+
+- structural.zero_dte：本次只取得 0DTE 佔 SPX 約 63% 的數字，但資料日為 2026-02-28，不構成當期快照，因此標為 FETCH FAILED、不作為證據。0DTE 屬投機結構的確認指標，不是 R1–R3 的直接觸發器，這個缺口不太可能改變結論。
+
+其他限制：speculation.insider_form4 的 0 件是二手篩選（openinsider）的結果；SEC EDGAR 一手連線受限，無法逐筆核對 Form 4 URL。內部人賣壓屬情緒指標，不影響路徑判讀。另外，evidence 檔把美債基差交易槓桿三個 script 區塊標為 fetch_failed，但 macro artifact 顯示 cftc_lev_funds、move_index、ofr_repo 皆為 `status: ok`；本報告以 validator 讀取的 macro artifact 為準。hyperscaler 融資結構與資本週期階段兩個 composite 來源的兩個組件都沒有取得披露，因此缺少 capex vs FCF 與週期定位的直接量測；AI infrastructure debt financing / vendor-financing loops 的 30 日掃描也沒有新披露，R3 的再融資牆因此無法量化。
+
+主要不確定性：
+
+1. **2026 Q2 hyperscaler 財報（窗口內）**：若有兩家轉為下修指引，R2 直接成立，並可能同時觸發 R1，結論會轉向 yes；若持續上修，則支撐 no。
+2. **CoreWeave 等 neocloud 的再融資與信用走勢**：CDS 已達約 665bp，若出現融資失敗、covenant 問題或 distressed exchange，R3 可能成立並經由信用傳導觸發 R1，結論將轉向 yes。
+3. **槓桿去化的速度**：margin debt YoY +53.7%、NAAIM 95.64 代表一旦跌勢延續就可能被強制平倉放大；若 HY OAS 明顯走闊並伴隨 repo 資金壓力，R1 剩餘約 19.58% 的距離可能被快速縮短。
+
+## 數據附錄
+
+### Raw data
+
+| source_id | 指標 | 數值 | 來源（FRED series ID / URL） | 資料日期 | 抓取 timestamp |
+|---|---|---|---|---|---|
+| valuation.sp500_trend | sp500_trend latest（S&P 500 收盤） | 7457.69 | FRED API (series_id=SP500) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| valuation.sp500_trend | sp500_trend dev200_pct（距 200 日均線 %） | 6.73 | FRED API (series_id=SP500) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| valuation.sp500_trend | sp500_trend dev52w_pct（距 52 週均線 %） | 8.42 | FRED API (series_id=SP500) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| valuation.ndx_drawdown | ndx_drawdown latest（最新收盤） | 28592.66 | FRED API (series_id=NASDAQ100) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| valuation.ndx_drawdown | ndx_drawdown high（252 日最高收盤） | 30660.6 | FRED API (series_id=NASDAQ100) | 2026-06-02 | 2026-07-20T09:30:00+08:00 |
+| valuation.ndx_drawdown | ndx_drawdown drawdown_pct（距 52 週高點回撤 %） | 6.74 | FRED API (series_id=NASDAQ100) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| valuation.ndx_drawdown | ndx_drawdown r1_threshold_level（R1 門檻水位） | 22995.45 | FRED API (series_id=NASDAQ100) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| retail.household_equity_allocation | BOGZ1FL153064486Q latest（2026 Q1 資料） | 45.76080873390133 | FRED API (series_id=BOGZ1FL153064486Q) | 2026-01-01 | 2026-07-20T09:30:00+08:00 |
+| monetary.fed_funds | DFEDTARU latest | 3.75 | FRED API (series_id=DFEDTARU) | 2026-07-19 | 2026-07-20T09:30:00+08:00 |
+| monetary.fed_funds | DFEDTARL latest | 3.5 | FRED API (series_id=DFEDTARL) | 2026-07-19 | 2026-07-20T09:30:00+08:00 |
+| monetary.hy_oas | BAMLH0A0HYM2 latest | 2.71 | FRED API (series_id=BAMLH0A0HYM2) | 2026-07-16 | 2026-07-20T09:30:00+08:00 |
+| monetary.ig_oas | BAMLC0A0CM latest | 0.78 | FRED API (series_id=BAMLC0A0CM) | 2026-07-16 | 2026-07-20T09:30:00+08:00 |
+| monetary.dgs10 | DGS10 latest | 4.57 | FRED API (series_id=DGS10) | 2026-07-16 | 2026-07-20T09:30:00+08:00 |
+| monetary.dfii10 | DFII10 latest | 2.35 | FRED API (series_id=DFII10) | 2026-07-16 | 2026-07-20T09:30:00+08:00 |
+| monetary.t10yie | T10YIE latest | 2.24 | FRED API (series_id=T10YIE) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| monetary.wti | DCOILWTICO latest | 79.2 | FRED API (series_id=DCOILWTICO) | 2026-07-13 | 2026-07-20T09:30:00+08:00 |
+| monetary.cpi_yoy | CPIAUCSL yoy_pct（2026-06 月資料） | 3.46 | FRED API (series_id=CPIAUCSL) | 2026-06-01 | 2026-07-20T09:30:00+08:00 |
+| monetary.t5yifr | T5YIFR latest | 2.21 | FRED API (series_id=T5YIFR) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| monetary.term_premium | THREEFYTP10 latest（Kim-Wright） | 0.7788 | FRED API (series_id=THREEFYTP10) | 2026-07-10 | 2026-07-20T09:30:00+08:00 |
+| monetary.repo_stress_srf | SOFR latest | 3.62 | FRED API (series_id=SOFR) | 2026-07-16 | 2026-07-20T09:30:00+08:00 |
+| monetary.repo_stress_srf | SOFR99 latest | 3.7 | FRED API (series_id=SOFR99) | 2026-07-16 | 2026-07-20T09:30:00+08:00 |
+| monetary.repo_stress_srf | IORB latest | 3.65 | FRED API (series_id=IORB) | 2026-07-20 | 2026-07-20T09:30:00+08:00 |
+| monetary.repo_stress_srf | RPONTTLD latest（SRF 動用，十億美元） | 0.0 | FRED API (series_id=RPONTTLD) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| monetary.walcl | WALCL latest | 6,743,028（$6.74T，百萬美元） | FRED API (series_id=WALCL) | 2026-07-15 | 2026-07-20T09:30:00+08:00 |
+| monetary.ecb_boj | ECBASSETSW latest | 5,970,516（€5.97T，百萬歐元） | FRED API (series_id=ECBASSETSW) | 2026-07-10 | 2026-07-20T09:30:00+08:00 |
+| monetary.ecb_boj | JPNASSETS latest | 6,395,509（¥639.55T，億日圓） | FRED API (series_id=JPNASSETS) | 2026-06-01 | 2026-07-20T09:30:00+08:00 |
+| structural.vix_spx_comove | VIXCLS latest | 18.77 | FRED API (series_id=VIXCLS) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| structural.vix_spx_comove | vix_spx_comove vix（as_of；comove=false） | 18.77 | FRED API (series_id=VIXCLS, SP500) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| structural.vix_spx_comove | vix_spx_comove vix_chg_pct（7 日窗口，base 2026-07-10） | 24.88 | FRED API (series_id=VIXCLS) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| structural.vix_spx_comove | vix_spx_comove sp500_chg_pct（7 日窗口，base 2026-07-10） | -1.55 | FRED API (series_id=SP500) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| structural.nbfi_bank_loans | LNFACBW027SBOG latest | 2004.0237（$2.00T，十億美元） | FRED API (series_id=LNFACBW027SBOG) | 2026-07-08 | 2026-07-20T09:30:00+08:00 |
+| structural.treasury_basis_trade | cftc_lev_funds net_contracts（六合約槓桿基金淨部位） | -7562874 | CFTC TFF (futures-only) | 2026-07-14 | 2026-07-20T09:30:00+08:00 |
+| structural.treasury_basis_trade | move_index latest | 70.88 | Yahoo Finance chart API (^MOVE) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| structural.treasury_basis_trade | ofr_repo transaction_volume_usd_bn（tri-party transaction volume） | 2342.6 | OFR STFM (REPO-TRIV1_TV_TOT-P) | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+
+### Coverage
+
+| source_id | 類別 / source bullet | 預定來源與方法 | 狀態 |
+|---|---|---|---|
+| valuation.sp500_pe_cape | 估值｜S&P 500 P/E and Shiller CAPE | multpl.com [primary: SEARCH] | ✓ SEARCH-VERIFIED |
+| valuation.mag7_multiples | 估值｜Mag 7 weighted P/E and AI leader P/S | MarketXLS WebSearch | ✓ SEARCH-VERIFIED |
+| valuation.analyst_tp_decomposition | 估值｜Analyst TP upgrade decomposition | 賣方研報 WebSearch（90d＋同季） | ✗ NOT DISCLOSED |
+| valuation.sp500_trend | 估值｜S&P 500 price-trend deviation | scripts/fetch_macro.py（FRED SP500） | ✓ API |
+| valuation.ndx_drawdown | 估值｜NASDAQ-100 drawdown from 52-week high | scripts/fetch_macro.py（FRED NASDAQ100） | ✓ API |
+| valuation.ai_credit_schism | 估值｜AI 信用定價分歧（equity-vs-credit schism） | 信用市場 WebSearch（14d） | ✓ SEARCH-VERIFIED |
+| breadth.rsp_spy | 廣度｜S&P 500 equal-weight (RSP) vs cap-weight (SPY) | 247wallst WebSearch | ✓ SEARCH-VERIFIED |
+| breadth.top10_concentration | 廣度｜Top-10 concentration in S&P 500 | ahasignals WebSearch | ✓ SEARCH-VERIFIED |
+| breadth.advance_decline | 廣度｜Advance/decline ratio, new high/low ratio | NYSE breadth WebSearch | ✓ SEARCH-VERIFIED |
+| retail.fear_greed | 散戶｜CNN Fear & Greed Index | cnn.com [primary: SEARCH]（MacroMicro 轉載） | ✓ SEARCH-VERIFIED |
+| retail.margin_debt | 散戶｜Margin Debt: FINRA monthly data | FINRA／Advisor Perspectives WebSearch（stock-of-state） | ✓ SEARCH-VERIFIED |
+| retail.aaii | 散戶｜Retail survey: AAII Investor Sentiment | aaii.com [primary: SEARCH] | ✓ SEARCH-VERIFIED |
+| retail.social_sentiment | 散戶｜Social sentiment proxies | WSB／cashtag WebSearch（7d） | ✗ NOT DISCLOSED |
+| retail.household_equity_allocation | 散戶｜Household equity allocation | scripts/fetch_macro.py（FRED BOGZ1FL153064486Q） | ✓ API |
+| retail.naaim | 散戶｜NAAIM Exposure Index | naaim／ycharts [primary: SEARCH] | ✓ SEARCH-VERIFIED |
+| institutional.bofa_jpm_survey | 機構｜BofA Fund Manager Survey and JPM institutional survey | 賣方調查 WebSearch | ✗ NOT DISCLOSED |
+| monetary.fed_funds | 貨幣｜Fed funds rate: FRED series DFEDTARU and DFEDTARL | scripts/fetch_macro.py | ✓ API（DFEDTARU ok；DFEDTARL ok） |
+| monetary.hy_oas | 貨幣｜High Yield OAS | scripts/fetch_macro.py（BAMLH0A0HYM2） | ✓ API |
+| monetary.ig_oas | 貨幣｜Investment Grade OAS | scripts/fetch_macro.py（BAMLC0A0CM） | ✓ API |
+| monetary.dgs10 | 貨幣｜10Y Treasury yield | scripts/fetch_macro.py（DGS10） | ✓ API |
+| monetary.dfii10 | 貨幣｜10Y Treasury real yield / TIPS | scripts/fetch_macro.py（DFII10） | ✓ API |
+| monetary.t10yie | 貨幣｜10Y breakeven inflation rate | scripts/fetch_macro.py（T10YIE，FRED 直接） | ✓ API |
+| monetary.wti | 貨幣｜WTI crude oil price | scripts/fetch_macro.py（DCOILWTICO） | ✓ API |
+| monetary.cpi_yoy | 貨幣｜CPI YoY: FRED series CPIAUCSL | scripts/fetch_macro.py（yoy_pct） | ✓ API |
+| monetary.t5yifr | 貨幣｜5y5y forward inflation expectation | scripts/fetch_macro.py（T5YIFR） | ✓ API |
+| monetary.term_premium | 貨幣｜10Y 期限溢價（term premium）: FRED series THREEFYTP10 | scripts/fetch_macro.py（Kim-Wright） | ✓ API |
+| monetary.repo_stress_srf | 貨幣｜repo 資金壓力（SOFR−IORB）與 SRF 動用: FRED series SOFR, SOFR99, IORB, RPONTTLD | scripts/fetch_macro.py（repo_stress block） | ✓ API（SOFR ok；SOFR99 ok；IORB ok；RPONTTLD ok） |
+| monetary.treasury_auctions | 貨幣｜美債標售需求（auction tail / bid-to-cover） | CryptoBriefing／TreasuryDirect [primary: SEARCH]（14d） | ✓ SEARCH-VERIFIED |
+| monetary.fedwatch | 貨幣｜Fed funds rate path expectations | CME FedWatch [primary: SEARCH] | ✓ SEARCH-VERIFIED |
+| monetary.walcl | 貨幣｜Fed balance sheet: FRED series WALCL | scripts/fetch_macro.py | ✓ API |
+| monetary.ecb_boj | 貨幣｜Global central bank liquidity cross-check — ECB / BOJ | scripts/fetch_macro.py（ECBASSETSW、JPNASSETS） | ✓ API（ECBASSETSW ok；JPNASSETS ok） |
+| monetary.pboc | 貨幣｜PBoC aggregate financing / liquidity operations | Bloomberg WebSearch | ✓ SEARCH-VERIFIED |
+| monetary.private_credit_liquidity | 貨幣｜Private-credit / non-bank fund liquidity stress | BDC 披露 [primary: SEARCH]（30d） | ✓ SEARCH-VERIFIED |
+| ai.hyperscaler_capex | AI｜Hyperscaler capex guidance | 季報 WebSearch（stock-of-state） | ✓ SEARCH-VERIFIED |
+| ai.token_growth | AI｜AI token volume growth rate | Anthropic／OpenAI／Google WebSearch | ✗ NOT DISCLOSED |
+| ai.openai_anthropic_revenue | AI｜OpenAI / Anthropic annualized revenue | Epoch／The Information WebSearch | ✓ SEARCH-VERIFIED |
+| ai.customer_concentration_rpo | AI｜Hyperscaler AI customer concentration 與 backlog 重複計算風險 | 財報電話 [primary: SEARCH] | ✗ NOT DISCLOSED |
+| ai.compute_supply_demand | AI｜AI compute supply/demand and overcapacity risk | TrendForce [primary: SEARCH] | ✓ SEARCH-VERIFIED |
+| ai.hyperscaler_financing_mix | AI｜Hyperscaler 融資結構（capex vs FCF / 發債） | 季報 [primary: SEARCH]；quarterly_state stock-of-state＋event_scan 30d | ✗ NOT DISCLOSED components=quarterly_state:not_disclosed,event_scan:not_disclosed |
+| ai.revenue_capex_gap | AI｜AI 營收對 capex 缺口（revenue-to-capex gap） | 組合披露 [primary: SEARCH] | ✓ SEARCH-VERIFIED |
+| ai.depreciation_life | AI｜GPU / 伺服器折舊年限變動 | 10-K／10-Q [primary: SEARCH]（30d） | ✗ NOT DISCLOSED |
+| ai.capital_cycle | AI｜資本週期階段（capital cycle stage） | 供需增速＋進出場事件 WebSearch；quarterly_state stock-of-state＋event_scan 30d | ✗ NOT DISCLOSED components=quarterly_state:not_disclosed,event_scan:not_disclosed |
+| speculation.ai_rename_spac | 投機｜Search for past 7 days: AI rename / SPAC | WebSearch（7d） | ✓ SEARCH-VERIFIED（1 件：EVTV→AZIO） |
+| speculation.ipo_heat | 投機｜IPO market heat | stockanalysis／Renaissance WebSearch | ✓ SEARCH-VERIFIED |
+| speculation.microcap_moonshots | 投機｜Microcap thematic moonshots | Finviz／Benzinga／StockTitan movers [primary: SEARCH] | ✓ SEARCH-VERIFIED（0 件） |
+| speculation.upcoming_ai_ipos | 投機｜Upcoming AI IPOs | S-1／具名報導 WebSearch（30d） | ✓ SEARCH-VERIFIED |
+| speculation.insider_form4 | 投機｜Insider selling at AI / market-leadership companies | SEC EDGAR／openinsider（14d；EDGAR 一手連線受限） | ✓ SEARCH-VERIFIED（0 件） |
+| speculation.equity_put_call | 投機｜Cboe equity-only put/call ratio | Cboe [primary: SEARCH] | ✓ SEARCH-VERIFIED |
+| structural.leveraged_etf_aum | 結構｜US leveraged ETF AUM | etf.com／cryptobriefing [primary: SEARCH] | ✓ SEARCH-VERIFIED |
+| structural.us_single_stock_etf | 結構｜US single-stock leveraged ETF approvals | GlobeNewswire／ETF.com WebSearch（30d） | ✓ SEARCH-VERIFIED |
+| structural.global_leveraged_approvals | 結構｜Global leveraged product approvals | KRX／TWSE／JPX／ESMA WebSearch（7d） | ✗ NOT DISCLOSED |
+| structural.zero_dte | 結構｜0DTE option volume | Cboe WebSearch | ⛔ FETCH FAILED（最新值資料日 2026-02-28，無當期快照） |
+| structural.options_volume | 結構｜Options total volume: OCC monthly volume report | theocc.com WebSearch | ✓ SEARCH-VERIFIED |
+| structural.cross_asset_derivatives | 結構｜Cross-asset derivatives / correlation checks | Cboe／AInvest WebSearch | ✓ SEARCH-VERIFIED |
+| structural.vix_spx_comove | 結構｜VIX / S&P 500 co-movement | scripts/fetch_macro.py（VIXCLS＋vix_spx_comove block） | ✓ API（VIXCLS ok；vix_spx_comove ok） |
+| structural.margin_debt_crosscheck | 結構｜Cross-reference only: FINRA margin debt | Advisor Perspectives WebSearch（交叉引用） | ✓ SEARCH-VERIFIED |
+| structural.ai_infrastructure_debt | 結構｜AI infrastructure debt financing / vendor-financing loops | [primary: SEARCH]（30d） | ✗ NOT DISCLOSED |
+| structural.nbfi_bank_loans | 結構｜Bank loans to nondepository financial institutions | scripts/fetch_macro.py（LNFACBW027SBOG） | ✓ API |
+| structural.treasury_basis_trade | 結構｜美債基差交易槓桿（Treasury basis-trade leverage） | scripts/fetch_macro.py（cftc_lev_funds、move_index、ofr_repo） | ✓ API（cftc_lev_funds ok；move_index ok；ofr_repo ok） |
+
+### SEARCH-VERIFIED traceability
+
+| source_id | 項目 | search query | 結果 URL／來源 | 發布或資料日期 | 抓取 timestamp |
+|---|---|---|---|---|---|
+| valuation.sp500_pe_cape | S&P 500 trailing P/E 32.08（原定來源 multpl.com） | S&P 500 trailing P/E July 2026 multpl | https://www.multpl.com/s-p-500-pe-ratio（multpl） | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| valuation.sp500_pe_cape | Shiller CAPE 41.52（原定來源 multpl.com） | Shiller CAPE ratio July 2026 multpl | https://www.multpl.com/shiller-pe（multpl） | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| valuation.mag7_multiples | Mag 7 加權 P/E 約 40 trailing | Magnificent 7 weighted PE 2026 | https://marketxls.com/blog/magnificent-7-valuation-dashboard-excel-may-2026（MarketXLS） | 2026-05-15 | 2026-07-20T09:30:00+08:00 |
+| valuation.ai_credit_schism | Oracle 5yr CDS 約 198bp 創紀錄、CoreWeave 約 665bp | Oracle CoreWeave CDS spread widening July 2026 | https://realinvestmentadvice.com/resources/blog/oracle-and-coreweave-cds-spreads-widening-omen-or-jitters/（RIA） | 2026-07-16 | 2026-07-20T09:30:00+08:00 |
+| breadth.rsp_spy | RSP +10.68% vs SPY +7.47% YTD | RSP vs SPY equal weight YTD 2026 divergence | https://247wallst.com/investing/2026/06/10/rsp-vs-spy-does-equal-weight-beat-the-cap-weighted-sp-500/（247wallst） | 2026-06-10 | 2026-07-20T09:30:00+08:00 |
+| breadth.top10_concentration | S&P 500 Top-10 集中度 36.40% | S&P 500 top 10 concentration percent 2026 | https://ahasignals.com/sp500-concentration-risk/（ahasignals） | 2026-07-02 | 2026-07-20T09:30:00+08:00 |
+| breadth.advance_decline | NYSE 07-17 下跌家數約為上漲 2 倍、NH 241／NL 166 | NYSE advance decline breadth July 17 2026 | https://money.usnews.com/investing/news/articles/2026-07-17/wall-st-futures-fall-as-chip-selloff-gathers-pace-netflix-tumbles（US News／Reuters） | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| retail.fear_greed | CNN Fear & Greed 37（Fear）（原定來源 cnn.com） | CNN Fear and Greed Index July 2026 | https://en.macromicro.me/charts/50108/cnn-fear-and-greed（MacroMicro） | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| retail.margin_debt | margin debt（2026-05 月資料）$1.416T、+53.7% YoY | FINRA margin debt May 2026 YoY | https://www.advisorperspectives.com/dshort/updates/2026/06/24/margin-debt-finra（Advisor Perspectives／FINRA） | 2026-05-31 | 2026-07-20T09:30:00+08:00 |
+| retail.aaii | AAII Bull 44.9% | AAII investor sentiment survey July 2026 | https://www.aaii.com/sentimentsurvey（AAII） | 2026-07-16 | 2026-07-20T09:30:00+08:00 |
+| retail.naaim | NAAIM Exposure Index 95.64 | NAAIM exposure index latest July 2026 | https://ycharts.com/indicators/naaim_number（YCharts） | 2026-07-15 | 2026-07-20T09:30:00+08:00 |
+| monetary.treasury_auctions | 10Y 標售 bid-to-cover 2.59、小幅 tail | US Treasury 10Y auction July 2026 bid to cover | https://cryptobriefing.com/us-treasury-10-year-note-auction-4580-yield/（CryptoBriefing） | 2026-07-08 | 2026-07-20T09:30:00+08:00 |
+| monetary.fedwatch | CME FedWatch 7/29 FOMC 持平約 86.7% | CME FedWatch rate hold probability July 2026 | https://cryptorank.io/news/feed/2d990-fed-rate-hold-july-cme-fedwatch（CryptoRank 引 CME） | 2026-07-18 | 2026-07-20T09:30:00+08:00 |
+| monetary.pboc | 人行 6M 買斷式逆回購投放 1.4 兆元 | PBoC reverse repo liquidity July 2026 | https://www.bloomberg.com/news/articles/2026-07-14/pboc-boosts-liquidity-to-smooth-tax-payments-debt-issuance（Bloomberg） | 2026-07-14 | 2026-07-20T09:30:00+08:00 |
+| monetary.private_credit_liquidity | Blue Owl OCIC Q2 redemption-request ratio 18.8%，5% quarterly redemption cap 下 gate proration / breach | private credit BDC redemption gate proration Q2 2026 Blue Owl | https://whbl.com/2026/07/02/blue-owl-keeps-withdrawal-limits-even-as-redemption-pressure-modestly-eases/（WHBL／Reuters） | 2026-07-02 | 2026-07-20T09:30:00+08:00 |
+| ai.hyperscaler_capex | hyperscaler 2026 capex 合計約 $700B、仍上修（2026 Q1 財報季） | hyperscaler capex 2026 guidance raised | https://finance.yahoo.com/sectors/technology/articles/hyperscalers-hit-700-billion-2026-111243744.html（Yahoo Finance） | 2026-05-15 | 2026-07-20T09:30:00+08:00 |
+| ai.openai_anthropic_revenue | Anthropic run-rate 約 $47B／OpenAI 約 $25B | OpenAI Anthropic annualized revenue run-rate 2026 | https://epoch.ai/data-insights/anthropic-openai-revenue（Epoch AI） | 2026-05-15 | 2026-07-20T09:30:00+08:00 |
+| ai.compute_supply_demand | 伺服器 DRAM 3Q26 合約價 +13–18% QoQ | DRAM HBM contract price 3Q26 TrendForce | https://www.trendforce.com/presscenter/news/20260703-13134.html（TrendForce） | 2026-07-03 | 2026-07-20T09:30:00+08:00 |
+| ai.revenue_capex_gap | 年化 capex 約 $700B（分母：hyperscaler 合計）vs AI 終端營收數百億美元級 | AI revenue to capex gap 2026 | https://epoch.ai/data-insights/anthropic-openai-revenue（Epoch AI） | 2026-05-15 | 2026-07-20T09:30:00+08:00 |
+| speculation.ai_rename_spac | EVTV→Azio AI（AZIO）改名，07-13 起以新代號交易 | AI rename ticker change July 2026 Azio EVTV | https://www.businesswire.com/news/home/20260710628386/en/Azio-AI-Holdings-Inc.-Nasdaq-EVTV-to-Begin-Trading-Under-New-Ticker-Symbol-AZIO-Completing-Corporate-Rebrand（Business Wire） | 2026-07-13 | 2026-07-20T09:30:00+08:00 |
+| speculation.ipo_heat | 2026 YTD 約 200 檔 IPO、募資 $141.2B | US IPO market 2026 YTD count proceeds | https://stockanalysis.com/ipos/2026/（StockAnalysis） | 2026-07-16 | 2026-07-20T09:30:00+08:00 |
+| speculation.microcap_moonshots | 本週合格 microcap moonshot 0 件 | microcap 100% single day quantum AI moonshot July 2026 | Finviz／Benzinga／StockTitan movers screener | — | 2026-07-20T09:30:00+08:00 |
+| speculation.upcoming_ai_ipos | Anthropic IPO 投資人會議，估值約 $965B、可能 10 月掛牌 | Anthropic IPO investor meetings July 2026 valuation | https://www.cnbc.com/2026/07/15/anthropic-ipo-banks-investor-meetings.html（CNBC） | 2026-07-15 | 2026-07-20T09:30:00+08:00 |
+| speculation.insider_form4 | 14 日內合格 Form 4 cluster 0 件（EDGAR 一手連線受限） | insider Form 4 cluster AI leaders July 2026 openinsider | SEC EDGAR／openinsider（一手 URL 無法取得） | — | 2026-07-20T09:30:00+08:00 |
+| speculation.equity_put_call | Cboe equity put/call 0.73（日讀數） | Cboe equity put call ratio July 2026 | https://www.cboe.com/markets/us/options/market-statistics/daily/（Cboe） | 2026-07-17 | 2026-07-20T09:30:00+08:00 |
+| structural.leveraged_etf_aum | US 槓桿 ETF 總 AUM 約 $198B | leveraged ETF AUM record 2026 TQQQ SOXL | https://cryptobriefing.com/leveraged-etfs-record-198b-aum/（CryptoBriefing） | 2026-07-10 | 2026-07-20T09:30:00+08:00 |
+| structural.us_single_stock_etf | Leverage Shares 推出 6 檔 2x GOOGL／AMZN／META／AAPL 等單一個股槓桿 ETF | single-stock leveraged ETF launch July 2026 Leverage Shares | https://www.globenewswire.com/news-release/2026/07/07/3323273/0/en/Leverage-Shares-by-Themes-Expands-Tech-Offering-with-Six-New-Single-Stock-Leveraged-ETFs.html（GlobeNewswire） | 2026-07-07 | 2026-07-20T09:30:00+08:00 |
+| structural.options_volume | OCC 2026-06 月成交 1,603,491,559 口、+45% YoY | OCC monthly options volume June 2026 | https://www.theocc.com/newsroom/views/2026/07-02-june-2026-monthly-volume-report（OCC） | 2026-07-02 | 2026-07-20T09:30:00+08:00 |
+| structural.cross_asset_derivatives | Cboe SKEW 145.13、VIX 約 16.5 contango | VIX term structure SKEW July 2026 | https://www.ainvest.com/news/0dte-volatility-drives-market-strategies-2026-2602/（AInvest） | 2026-07-15 | 2026-07-20T09:30:00+08:00 |
+| structural.margin_debt_crosscheck | margin debt（2026-05 月資料）$1.416T、+53.7% YoY（交叉引用散戶 margin debt） | FINRA margin debt equity market cap 2026 | https://www.advisorperspectives.com/dshort/updates/2026/06/24/margin-debt-finra（Advisor Perspectives） | 2026-05-31 | 2026-07-20T09:30:00+08:00 |
+
+## 本次預測存檔
+
+```json
+{
+  "date": "2026-07-20",
+  "iso_week": "2026-W30",
+  "weekday": "Monday",
+  "timezone": "Asia/Taipei",
+  "question_version": 1,
+  "resolution_version": 1,
+  "answer": "no",
+  "horizon_end": "2027-01-18",
+  "prior_date": "2026-07-16",
+  "prior_answer": "yes",
+  "flip_evidence": ["valuation.ndx_drawdown"],
+  "r1_drawdown_pct": 6.74,
+  "resolution": null
+}
+```
+
+本報告為條件式判斷，非投資建議或擇時訊號。

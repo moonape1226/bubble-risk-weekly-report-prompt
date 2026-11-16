@@ -1,0 +1,27 @@
+{
+  "case_id": "replay-2026-10-18",
+  "run_date": "2026-10-18",
+  "prior_date": "2026-09-13",
+  "kind": "replay",
+  "prior_kind": "legacy",
+  "ndx_drawdown_pct": 4.13,
+  "description": "Historical replay.",
+  "asof_fail": "",
+  "evidence_edit": null,
+  "tags": [
+    "replay",
+    "prior:legacy",
+    "r1:<5%",
+    "holiday-gap"
+  ],
+  "reference": "archived production output (model-derived, not human-verified)",
+  "macro_fidelity": {
+    "same": 18,
+    "date_diff": 0,
+    "value_diff": 0,
+    "diffs": [],
+    "non_ok": [],
+    "fallback_source": []
+  },
+  "fetch_log": "asof_fetch: SP500 not in ALFRED; observation_end=2026-10-16 (no vintage)"
+}

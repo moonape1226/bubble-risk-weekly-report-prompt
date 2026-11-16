@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-18",
+  "iso_week": "2026-W42",
+  "weekday": "Sunday",
+  "timezone": "Asia/Taipei",
+  "valuation": 76,
+  "breadth": 56,
+  "speculation": 44,
+  "retail": 42,
+  "monetary": 85,
+  "structural": 80,
+  "total": 66,
+  "tier": "高",
+  "regime": "穩定共存",
+  "trigger_state": "已擊發",
+  "trigger_reasons": [
+    "hy_oas_fired",
+    "hy_streak"
+  ],
+  "monetary_side": "扳機側",
+  "hy_oas_widening_streak": 3,
+  "sp500_dev200_pct": 5.34
+}

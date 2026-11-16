@@ -1,0 +1,20 @@
+{
+  "date": "2026-08-06",
+  "iso_week": "2026-W32",
+  "weekday": "Thursday",
+  "timezone": "Asia/Taipei",
+  "valuation": 78,
+  "breadth": 30,
+  "speculation": 57,
+  "retail": 52,
+  "monetary": 76,
+  "structural": 78,
+  "total": 64,
+  "tier": "警戒",
+  "regime": "分歧",
+  "trigger_state": "未擊發",
+  "trigger_reasons": [],
+  "monetary_side": "自滿側",
+  "hy_oas_widening_streak": 0,
+  "sp500_dev200_pct": 9.71
+}
