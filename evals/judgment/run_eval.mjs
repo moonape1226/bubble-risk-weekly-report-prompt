@@ -296,11 +296,19 @@ async function runCase(input, ctx) {
   // ws/.claude is created by Claude Code itself under the sandbox; grading never reads ws, so it is not checked.
   // Outputs are read only as plain files: a symlink planted in the workspace
   // (e.g. report.md -> ~/.env) would otherwise copy its target into out/ and the judge prompt.
+  // One open with O_NOFOLLOW, checks and read on the same descriptor (no lstat/read race).
   const read = f => {
-    const st = lstatOrNull(join(ws, f));
-    if (!st) return null;
-    if (!st.isFile() || st.isSymbolicLink() || st.nlink > 1) { tampered.push(`${f} (not a regular file)`); return null; }
-    return readFileSync(join(ws, f), 'utf8');
+    let fd;
+    try { fd = openSync(join(ws, f), FS.O_RDONLY | NOFOLLOW); }
+    catch (e) {
+      if (e?.code === 'ENOENT') return null;
+      tampered.push(`${f} (${e?.code === 'ELOOP' ? 'symlink' : 'unreadable'})`); return null;
+    }
+    try {
+      const st = fstatSync(fd);
+      if (!st.isFile() || st.nlink > 1) { tampered.push(`${f} (not a regular file)`); return null; }
+      return readFileSync(fd, 'utf8');
+    } finally { closeSync(fd); }
   };
   const report = read('report.md'), forecast = read('forecast.json');
   // keep the produced files next to the trace
