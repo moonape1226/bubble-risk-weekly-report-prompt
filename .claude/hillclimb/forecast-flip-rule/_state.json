@@ -1,0 +1,66 @@
+{
+  "flow": "forecast-flip-rule",
+  "harness_paths": [
+    "evals/judgment/run_eval.mjs",
+    "bubble-risk-weekly-prompt.md",
+    "report_contract.json",
+    "scripts/validate_report.py"
+  ],
+  "metrics": [
+    {
+      "id": "judgment",
+      "label": "rubric",
+      "kind": "float",
+      "scale": 1
+    },
+    {
+      "id": "first_pass",
+      "label": "1st-try pass",
+      "kind": "binary"
+    },
+    {
+      "id": "yes",
+      "label": "answer=yes",
+      "kind": "binary"
+    },
+    {
+      "id": "valid",
+      "label": "validator",
+      "kind": "binary"
+    }
+  ],
+  "perf_fields": [
+    {
+      "id": "cli_cost_usd",
+      "label": "cost",
+      "unit": "$"
+    },
+    {
+      "id": "in_tokens",
+      "label": "in tok"
+    },
+    {
+      "id": "out_tokens",
+      "label": "out tok"
+    },
+    {
+      "id": "latency_s",
+      "label": "latency",
+      "unit": "s"
+    },
+    {
+      "id": "validator_runs",
+      "label": "validator runs"
+    },
+    {
+      "id": "num_turns",
+      "label": "turns"
+    },
+    {
+      "id": "refused",
+      "label": "refused"
+    }
+  ],
+  "metrics_md": "valid: validator --dry-run exit 0 on final report.md + forecast.json. first_pass: the model's first validator call passed. judgment: share of applicable rubric criteria (path_status, no_fabrication, both_sides, decision, gaps, flip) passed, Sonnet 5.5 judge. yes: answer was yes (no gold label; read as a rate). Flow purpose: compare the asymmetric flip rule (v1) against the current rule (baseline), both under the locked-down runner, on the 6 flip cases, their 6 replay twins and 2 borderline degraded cases.",
+  "harness_sha": "289e86b12311903c9ebc3ec5dc961e3aef3a2086b05fb7378caa4be8ae1690fc"
+}

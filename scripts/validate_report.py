@@ -384,9 +384,17 @@ def validate_contract(contract, failures):
                 or not {"date", "iso_week", "weekday", "timezone",
                         "question_version", "resolution_version", "answer",
                         "horizon_end", "prior_date", "prior_answer",
-                        "flip_evidence", "r1_drawdown_pct", "resolution"
-                        } == set(fields)):
+                        "flip_evidence", "yes_basis", "r1_drawdown_pct",
+                        "resolution"} == set(fields)):
             failures.add("contract forecast_schema.current_fields is invalid")
+        optional = schema.get("prior_optional_fields") if isinstance(schema, dict) else None
+        if (not isinstance(optional, list) or not isinstance(fields, list)
+                or not set(optional) <= set(fields)
+                or {"date", "answer"} & set(optional)):
+            failures.add("contract forecast_schema.prior_optional_fields is invalid")
+        max_basis = schema.get("yes_basis_max_items") if isinstance(schema, dict) else None
+        if type(max_basis) is not int or max_basis < 1:
+            failures.add("contract forecast_schema.yes_basis_max_items is invalid")
         calibration = contract["calibration"]
         if (not isinstance(calibration, dict) or set(calibration) != {
                 "decomposition_identity_tolerance_bps", "vix_comove_chg_pct",
@@ -1926,7 +1934,7 @@ def macro_component_evidence_fields(component, block):
 
 # Heading roles.  The contract owns the heading text and count; these indexes
 # only name which contract heading plays which role.
-H_CONCLUSION, H_RESOLUTION, H_PATHS = 0, 1, 2
+H_CONCLUSION, H_RESOLUTION, H_PATHS, H_YES = 0, 1, 2, 3
 H_COMPARISON, H_GAPS, H_APPENDIX, H_ARCHIVE = 5, 6, 7, 8
 DRY_RUN_BANNER = "> [DRY RUN] this report was not committed to archive."
 PATH_TAGS = ("[R1]", "[R2]", "[R3]", "[整體]")
@@ -2205,6 +2213,26 @@ def validate_evidence_sections(doc, evidence, contract, failures):
                 )
 
 
+def yes_basis_problem(basis, answer, contract):
+    """Shape of a forecast's yes_basis (current or prior), or None when valid."""
+    max_basis = contract["forecast_schema"]["yes_basis_max_items"]
+    source_ids = {source["id"] for source in contract["sources"]}
+    if not isinstance(basis, list) or any(
+            not isinstance(item, dict) or set(item) != {"source_id", "claim"}
+            or not isinstance(item["source_id"], str)
+            or not isinstance(item["claim"], str) or not item["claim"].strip()
+            for item in basis):
+        return "yes_basis must be an array of {source_id, claim} objects with non-empty claims"
+    for item in basis:
+        if item["source_id"] not in source_ids:
+            return f"yes_basis {item['source_id']!r} is not a contract source_id"
+    if answer == "yes" and not 1 <= len(basis) <= max_basis:
+        return f"yes_basis must list 1-{max_basis} items when the answer is yes"
+    if answer == "no" and basis:
+        return "yes_basis must be [] when the answer is no"
+    return None
+
+
 def validate_forecast_object(forecast, contract, macro, report_day, label, failures):
     fields = contract["forecast_schema"]["current_fields"]
     if set(forecast) != set(fields):
@@ -2247,6 +2275,9 @@ def validate_forecast_object(forecast, contract, macro, report_day, label, failu
     flips = forecast["flip_evidence"]
     if not isinstance(flips, list) or any(not isinstance(i, str) for i in flips):
         failures.add(f"{label} flip_evidence must be an array of strings")
+    problem = yes_basis_problem(forecast["yes_basis"], forecast["answer"], contract)
+    if problem:
+        failures.add(f"{label} {problem}")
     ndx = macro.get("ndx_drawdown", {})
     if ndx.get("status") == "ok":
         if (not finite_number(forecast["r1_drawdown_pct"])
@@ -2270,8 +2301,29 @@ def evidence_days(evidence, source_id):
     return days
 
 
+def validate_yes_basis(doc, forecast, evidence, contract, failures):
+    """Each decisive yes reason is a successful source cited in the yes section."""
+    basis = forecast.get("yes_basis")
+    if not isinstance(basis, list):
+        return
+    source_ids = {source["id"] for source in contract["sources"]}
+    heading = contract["headings"][H_YES]
+    cited = set(cited_source_ids(section_text(doc, heading), source_ids))
+    for item in basis:
+        source_id = item.get("source_id") if isinstance(item, dict) else None
+        if not isinstance(source_id, str):
+            continue
+        if source_id not in source_ids:
+            continue  # reported by yes_basis_problem
+        if not evidence["available"].get(source_id):
+            failures.add(f"yes_basis {source_id} lacks a successful Coverage status")
+        if source_id not in cited:
+            failures.add(f"yes_basis {source_id} is not cited in {heading}")
+
+
 def validate_prior_and_flip(doc, forecast, prior, evidence, macro, contract, failures):
-    fields = contract["forecast_schema"]["current_fields"]
+    schema = contract["forecast_schema"]
+    fields = [f for f in schema["current_fields"] if f not in schema["prior_optional_fields"]]
     heading = contract["headings"][H_COMPARISON]
     lines = [line.strip() for _, line in doc.section_lines(heading) if line.strip()]
     text = "\n".join(lines)
@@ -2312,6 +2364,22 @@ def validate_prior_and_flip(doc, forecast, prior, evidence, macro, contract, fai
     expected = f"前次結論：{prior['answer']}（report-{prior['date']}）"
     if first != expected:
         failures.add(f"{heading} first line must be `{expected}`")
+    # A prior yes must be re-earned: every decisive reason it recorded is
+    # addressed, whether this run keeps yes or returns to no.  Matched as a
+    # bare identifier because a reason's source may have failed this run.
+    # Absent (a forecast written before yes_basis existed) means nothing to
+    # address; present means it must be valid for the prior's own answer.
+    prior_basis = prior.get("yes_basis", [])
+    if "yes_basis" in prior:
+        problem = yes_basis_problem(prior_basis, prior["answer"], contract)
+        if problem:
+            failures.add(f"prior forecast {problem}")
+            return
+    for item in prior_basis:
+        if not mentions_identifier(text, item["source_id"]):
+            failures.add(
+                f"{heading} must address prior yes_basis source {item['source_id']}"
+            )
     verdict_lines = [line for line in lines if line.startswith("本次結論：")]
     answer = forecast.get("answer")
     if answer != prior["answer"]:
@@ -2330,7 +2398,9 @@ def validate_prior_and_flip(doc, forecast, prior, evidence, macro, contract, fai
                 continue
             if not evidence["available"].get(source_id):
                 failures.add(f"flip_evidence {source_id} lacks a successful Coverage status")
-            if prior_day and not any(
+            # Only no -> yes needs post-dated evidence; yes -> no may rest on
+            # a prior reason that faded or never met the bar.
+            if answer == "yes" and prior_day and not any(
                     day > prior_day for day in evidence_days(evidence, source_id)):
                 failures.add(
                     f"flip_evidence {source_id} has no Raw/traceability row dated after "
@@ -2950,6 +3020,7 @@ def main(argv=None):
     validate_resolution_section(doc, contract, failures)
     validate_paths_section(doc, macro, contract, failures)
     validate_evidence_sections(doc, evidence, contract, failures)
+    validate_yes_basis(doc, current, evidence, contract, failures)
     validate_prior_and_flip(
         doc, current, prior, evidence, macro, contract, failures
     )

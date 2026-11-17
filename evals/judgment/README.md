@@ -32,3 +32,18 @@ Start only one copy at a time: two concurrent runs on the same variant both run 
 64/64 ok. valid 1.000, first_pass 0.031, judgment 0.777, yes 0.188. Anchoring 2/12: with a synthetic prior answering yes, the model keeps yes in 10 of 12 flip runs, while the same evidence without a forecast prior gives no in all 36 replay runs. Rep agreement 30/32; no answer changes across the 18 replay dates. Most common judge failure: no_fabrication (claims not in the inputs, e.g. historical margin-debt benchmarks).
 
 `baseline/` side files: `results.flip-r1null.jsonl` holds the first flip run, made when the synthetic prior had `r1_drawdown_pct: null` (the model used that null as "new evidence" to flip; superseded). `results.dup.jsonl` holds 20 duplicate rows from two overlapping reruns. `errors.superseded.jsonl` holds 43 usage-limit failures, each later rerun successfully.
+
+## Flip-rule comparison (2026-11-17, flow `.claude/hillclimb/forecast-flip-rule`)
+
+All variants ran on claude-opus-5-5 under the locked-down runner. `baseline` is the prompt at 7b06fad (symmetric flip rule). `v1` makes the flip rule asymmetric and adds `yes_basis` (diff kept as `v1.patch`). `v2` = v1 plus the anti-fabrication change (removes the prompt's own unsourced margin-debt "+40–50% at 1999/2007/2021 tops" benchmark, which the judge cannot see and scored as fabrication; rule 6 now covers historical benchmarks and company financials). `v3` = v2 with the final runner (judge `flip` criterion rewritten to the asymmetric rule; `harness_paths` resolved against the runner's repo; API error text and status read from the result event).
+
+| | baseline | v1 | v2 | v3 |
+|---|---|---|---|---|
+| cases × reps | 14 × 2 | 14 × 2 | 6 × 2 | 26 × 1 |
+| valid | 26/28 | 28/28 | 11/12 | 26/26 |
+| anchoring (flip answer = replay answer) | 2/11 | 10/12 | 5/5 | — |
+| decision fails | 6 | 0 | 0 | 0 |
+| no_fabrication fails | 6 | 14 | 1 | 0 |
+| judgment excluding `flip` | 0.835 | 0.800 | 0.904 | 0.967 |
+
+On the 12 case-reps v2 shares with the others (flip and replay 07-20, 08-06, 08-24), no_fabrication fails were 5 / 11 / 1 for baseline / v1 / v2. v3 covers the remaining 26 of the 32 cases; against the original 64-run baseline on the same cases (rep0 / rep1): no_fabrication fails 12 / 12 → 0, decision fails 2 / 1 → 0, yes answers 3 / 5 → 0, where the original yes answers were the three flip cases (anchoring) plus one rep each of the borderline deg-baseline and deg-repo-partial. The judge's `flip` criterion in baseline–v2 still encoded the symmetric rule, so v1/v2 `flip` fails are expected and excluded above. The two invalid rows in baseline and one in v2 fail on appendix formatting unrelated to the flip rule. Per-variant results, summaries and model outputs are committed; traces are not.

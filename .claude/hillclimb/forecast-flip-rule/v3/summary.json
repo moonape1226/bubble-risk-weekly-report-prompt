@@ -1,0 +1,27 @@
+{
+  "rows": 26,
+  "ok_rows": 26,
+  "means": {
+    "valid": 1.0,
+    "first_pass": 0.0,
+    "judgment": 0.969,
+    "yes": 0.0
+  },
+  "cost_usd_total": 50.13,
+  "anchoring": {
+    "agree": 3,
+    "pairs": 3,
+    "disagree": []
+  },
+  "rep_agreement": {
+    "agree": 0,
+    "cases": 0,
+    "split": []
+  },
+  "replay_changes": {
+    "rep0": {
+      "replays": 15,
+      "changes": []
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "rows": 28,
+  "ok_rows": 28,
+  "means": {
+    "valid": 1.0,
+    "first_pass": 0.071,
+    "judgment": 0.757,
+    "yes": 0.107
+  },
+  "cost_usd_total": 56.05,
+  "anchoring": {
+    "agree": 10,
+    "pairs": 12,
+    "disagree": [
+      "flip-2026-11-08 rep0: flip=yes replay=no",
+      "flip-2026-11-08 rep1: flip=yes replay=no"
+    ]
+  },
+  "rep_agreement": {
+    "agree": 13,
+    "cases": 14,
+    "split": [
+      "deg-baseline"
+    ]
+  },
+  "replay_changes": {
+    "rep0": {
+      "replays": 6,
+      "changes": []
+    },
+    "rep1": {
+      "replays": 6,
+      "changes": []
+    }
+  }
+}
