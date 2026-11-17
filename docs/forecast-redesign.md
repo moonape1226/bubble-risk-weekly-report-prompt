@@ -28,7 +28,7 @@
 2. **解析條件**：第 2 節全文，鎖字，每期原樣照印。
 3. **三條路徑現況**：R1 目前距 52 週高點的回撤（由 macro artifact 計算，validator 可重現）、R2 各家最新 capex 指引與方向、R3 主要 AI 借款人的信用狀況（利差、殖利率、評等、到期牆）。
 4. **支持 yes 的證據**、**支持 no 的證據**：每條都引用 `source_id`，兩邊都必須寫，不可只寫一邊。
-5. **與前期比較**：前期結論；若本期結論不同，必須列出造成翻轉的新證據（`source_id`，且資料日期在前期之後）；沒有新證據就不得翻轉。這一條用來抑制 yes/no 在邊界附近來回跳動。
+5. **與前期比較**：前期結論；若本期結論不同，必須列出翻轉依據。no 翻 yes 須有新證據（`source_id`，且資料日期在前期之後），用來抑制 yes 在雜訊上出現。yes 則每期重新論證：答 yes 時把決定性理由寫進 `yes_basis`，下一期逐條交代是否仍成立；理由不再成立（或重新檢視後本來就不足）即可翻回 no，不需要新的反向證據。2026-11 修訂：原本兩個方向都要求新證據，eval 顯示前次答 yes 時 12 次裡有 10 次被鎖在 yes，即使同一份證據在沒有前次時一律答 no。
 6. **資料缺漏與不確定性**：哪些來源 FETCH FAILED，以及缺漏是否足以改變結論。
 7. **數據附錄**：沿用現行 Raw data／Coverage／SEARCH-VERIFIED traceability 三張表與 `source_id` 制度。
 8. **免責聲明**。
@@ -41,14 +41,14 @@
 
 ## 5. Archive 與網站
 
-- 新報告存為 `report-YYYY-MM-DD/{forecast.json, report.md}`。`forecast.json` 包含：`date`、`answer`、`horizon_end`、`resolution_version`、`prior_answer`、`flip_evidence`（source_id 清單）、`r1_drawdown_pct`、`resolution`（null，留給 resolver）。
+- 新報告存為 `report-YYYY-MM-DD/{forecast.json, report.md}`。`forecast.json` 包含：`date`、`answer`、`horizon_end`、`resolution_version`、`prior_answer`、`flip_evidence`（source_id 清單）、`yes_basis`（答 yes 時的決定性理由，2026-11 新增）、`r1_drawdown_pct`、`resolution`（null，留給 resolver）。
 - 舊的 `score.json` 期別保持不動。`build_site.py` 要同時支援兩種格式：首頁改為顯示最新結論與 R1–R3 現況，歷史表依格式分別顯示分數或 yes/no。網站必須在第一份新格式報告寫入 archive 之前改好。
 
 ## 6. Validator
 
 保留：章節／表格鎖定、`source_id` 對應與追溯、macro artifact 驗證、mode banner、standalone JSON 與報告 fence 一致、原子 archive 規則。
 
-新增：`answer` ∈ {yes, no}；解析條件全文逐字相符；R1 回撤數字可由 macro artifact 重現；結論與前期不同時，`flip_evidence` 非空、每個 source_id 存在，且資料日期晚於前期；yes／no 兩邊的證據各至少一條。
+新增：`answer` ∈ {yes, no}；解析條件全文逐字相符；R1 回撤數字可由 macro artifact 重現；結論與前期不同時，`flip_evidence` 非空、每個 source_id 存在；no 翻 yes 時資料日期須晚於前期；前次答 yes 時須逐條提到前次 `yes_basis` 的 source_id；yes／no 兩邊的證據各至少一條。
 
 移除：所有分數算術、tier、anchor feature audit、trigger reason code。
 
@@ -61,4 +61,4 @@
 
 ## 8. 之後的 eval
 
-沿用已建的 26 個凍結證據包（`evals/judgment/cases/`）。評分改為：validator 通過、rubric（證據撐得住結論、正反兩面都有、R1–R3 現況正確）、一致性（相鄰期別在證據沒變時結論不變，翻轉都有新證據支撐）、降級情境（資料缺漏時不過度自信）。真正的準確度要到第一份新格式報告到期（約 2027-05）才開始累積，而且樣本彼此高度相關。回測時要注意：知識截止日晚於 D+182 的模型可能已經知道答案。
+沿用已建的 26 個凍結證據包（`evals/judgment/cases/`）。評分改為：validator 通過、rubric（證據撐得住結論、正反兩面都有、R1–R3 現況正確）、一致性（相鄰期別在證據沒變時結論不變；no 翻 yes 有新證據支撐，yes 翻 no 須逐條說明前次 yes 理由為何不再成立）、降級情境（資料缺漏時不過度自信）。真正的準確度要到第一份新格式報告到期（約 2027-05）才開始累積，而且樣本彼此高度相關。回測時要注意：知識截止日晚於 D+182 的模型可能已經知道答案。

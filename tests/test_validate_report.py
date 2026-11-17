@@ -221,6 +221,12 @@ def macro_payload(baseline=False):
     return payload
 
 
+YES_BASIS = [{
+    "source_id": "valuation.ai_credit_schism",
+    "claim": "AI 信用定價出現分歧，部分借款人利差擴大。",
+}]
+
+
 def forecast_payload(mode="forecast", answer="no", **overrides):
     """Current forecast.  mode: forecast prior | legacy prior | baseline."""
     flip = mode == "forecast" and answer != "no"
@@ -236,6 +242,7 @@ def forecast_payload(mode="forecast", answer="no", **overrides):
         "prior_date": None if mode == "baseline" else PRIOR_DATE,
         "prior_answer": "no" if mode == "forecast" else None,
         "flip_evidence": ["ai.hyperscaler_capex"] if flip else [],
+        "yes_basis": YES_BASIS if answer == "yes" else [],
         "r1_drawdown_pct": NDX_DRAWDOWN,
         "resolution": None,
     }
@@ -256,6 +263,7 @@ def prior_forecast_payload(answer="no", **overrides):
         "prior_date": None,
         "prior_answer": None,
         "flip_evidence": [],
+        "yes_basis": YES_BASIS if answer == "yes" else [],
         "r1_drawdown_pct": 4.5,
         "resolution": None,
     }
@@ -1301,6 +1309,139 @@ class PriorAndFlip(ValidatorCase):
         report = replace_once(
             make_report(answer="yes"), "見 `ai.hyperscaler_capex`，", "見資本支出來源，")
         self.assert_fails(report=report, answer="yes", contains="is not cited in")
+
+    # --- yes_basis and the asymmetric flip rule ---
+
+    MAINTAIN_NO = (
+        f"前次結論：no（report-{PRIOR_DATE}）\n\n本次結論：維持\n\n"
+        "- 自前次預測以來無足以改變結論的新證據。"
+    )
+
+    def _yes_prior(self, answer, comparison, **current_overrides):
+        """Report/forecast pair whose prior forecast answered yes."""
+        fields = dict(prior_answer="yes",
+                      flip_evidence=["valuation.ai_credit_schism"] if answer == "no" else [])
+        fields.update(current_overrides)
+        current = forecast_payload(answer=answer, **fields)
+        report = make_report(answer=answer, forecast=current)
+        old = (self.MAINTAIN_NO if answer == "no" else
+               f"前次結論：no（report-{PRIOR_DATE}）\n\n本次結論：翻轉\n\n翻轉依據：\n"
+               "- 四大雲端業者之一下修資本支出指引，見 `ai.hyperscaler_capex`，資料日期晚於前次預測。")
+        report = replace_once(report, old, comparison)
+        return dict(report=report, answer=answer, current_forecast=current,
+                    prior_forecast=prior_forecast_payload(answer="yes"))
+
+    YES_TO_NO = (
+        f"前次結論：yes（report-{PRIOR_DATE}）\n\n本次結論：翻轉\n\n翻轉依據：\n"
+        "- 前次 yes 的決定性理由 `valuation.ai_credit_schism` 重新檢視後不足以支撐 yes：利差分歧僅限少數借款人，未見再融資失敗。"
+    )
+    YES_KEPT = (
+        f"前次結論：yes（report-{PRIOR_DATE}）\n\n本次結論：維持\n\n"
+        "- 前次理由 `valuation.ai_credit_schism` 仍成立：利差分歧持續擴大。"
+    )
+
+    def test_yes_requires_yes_basis(self):
+        current = forecast_payload(answer="yes", yes_basis=[])
+        self.assert_fails(
+            report=make_report(answer="yes", forecast=current), answer="yes",
+            current_forecast=current, contains="yes_basis must list 1-3 items")
+
+    def test_yes_basis_capped(self):
+        current = forecast_payload(answer="yes", yes_basis=YES_BASIS * 4)
+        self.assert_fails(
+            report=make_report(answer="yes", forecast=current), answer="yes",
+            current_forecast=current, contains="yes_basis must list 1-3 items")
+
+    def test_no_requires_empty_yes_basis(self):
+        current = forecast_payload(yes_basis=YES_BASIS)
+        self.assert_fails(
+            report=make_report(forecast=current), current_forecast=current,
+            contains="yes_basis must be [] when the answer is no")
+
+    def test_yes_basis_items_need_source_and_claim(self):
+        current = forecast_payload(
+            answer="yes", yes_basis=[{"source_id": "valuation.ai_credit_schism", "claim": " "}])
+        self.assert_fails(
+            report=make_report(answer="yes", forecast=current), answer="yes",
+            current_forecast=current, contains="non-empty claims")
+
+    def test_yes_basis_must_be_contract_source(self):
+        current = forecast_payload(
+            answer="yes", yes_basis=[{"source_id": "made.up_source", "claim": "x"}])
+        self.assert_fails(
+            report=make_report(answer="yes", forecast=current), answer="yes",
+            current_forecast=current, contains="yes_basis 'made.up_source' is not a contract")
+
+    def test_yes_basis_must_be_cited_in_yes_section(self):
+        # ai.hyperscaler_capex is successful and cited elsewhere, not under 支持 yes 的證據.
+        current = forecast_payload(
+            answer="yes", yes_basis=[{"source_id": "ai.hyperscaler_capex", "claim": "x"}])
+        self.assert_fails(
+            report=make_report(answer="yes", forecast=current), answer="yes",
+            current_forecast=current, contains="yes_basis ai.hyperscaler_capex is not cited in")
+
+    def test_yes_to_no_passes_without_postdated_evidence(self):
+        case = self._yes_prior("no", self.YES_TO_NO)
+        row = raw_row("valuation.ai_credit_schism")
+        dated = row.replace("| 2026-07-12 |", f"| {PRIOR_DATE} |")
+        self.assertNotEqual(row, dated)
+        case["report"] = replace_once(case["report"], row, dated)
+        self.assert_passes(**case)
+
+    def test_yes_to_no_must_address_prior_yes_basis(self):
+        comparison = self.YES_TO_NO.replace(
+            "`valuation.ai_credit_schism` 重新檢視後", "見 `ai.hyperscaler_capex`，重新檢視後")
+        case = self._yes_prior("no", comparison, flip_evidence=["ai.hyperscaler_capex"])
+        self.assert_fails(**case, contains="must address prior yes_basis source valuation.ai_credit_schism")
+
+    def test_yes_to_no_requires_flip_line(self):
+        case = self._yes_prior("no", self.YES_TO_NO.replace("本次結論：翻轉", "本次結論：維持"))
+        self.assert_fails(**case, contains="本次結論：翻轉")
+
+    def test_yes_kept_passes_when_prior_basis_addressed(self):
+        self.assert_passes(**self._yes_prior("yes", self.YES_KEPT))
+
+    def test_yes_kept_must_address_prior_yes_basis(self):
+        comparison = self.YES_KEPT.replace("前次理由 `valuation.ai_credit_schism` 仍成立", "前次理由仍成立")
+        case = self._yes_prior("yes", comparison)
+        self.assert_fails(**case, contains="must address prior yes_basis source")
+
+    def test_no_to_yes_still_requires_postdated_evidence_with_basis(self):
+        # Unchanged direction: covered by test_flip_evidence_must_postdate_prior_forecast;
+        # here the golden no -> yes flip with a yes_basis still passes.
+        self.assert_passes(answer="yes")
+
+    def test_prior_forecast_without_yes_basis_is_accepted(self):
+        prior = prior_forecast_payload()
+        del prior["yes_basis"]
+        self.assert_passes(prior_forecast=prior)
+
+    def test_prior_forecast_with_malformed_yes_basis_fails(self):
+        self.assert_fails(
+            prior_forecast=prior_forecast_payload(yes_basis="R3"),
+            contains="prior forecast yes_basis must be an array")
+
+    def test_prior_yes_basis_item_without_claim_fails(self):
+        case = self._yes_prior("yes", self.YES_KEPT)
+        case["prior_forecast"]["yes_basis"] = [{"source_id": "valuation.ai_credit_schism"}]
+        self.assert_fails(**case, contains="prior forecast yes_basis must be an array")
+
+    def test_prior_yes_without_yes_basis_field_is_accepted(self):
+        for answer, comparison in (("yes", self.YES_KEPT), ("no", self.YES_TO_NO)):
+            with self.subTest(answer=answer):
+                case = self._yes_prior(answer, comparison)
+                del case["prior_forecast"]["yes_basis"]
+                self.assert_passes(**case)
+
+    def test_prior_yes_with_empty_yes_basis_fails(self):
+        case = self._yes_prior("yes", self.YES_KEPT)
+        case["prior_forecast"]["yes_basis"] = []
+        self.assert_fails(**case, contains="prior forecast yes_basis must list 1-3 items")
+
+    def test_prior_yes_basis_must_name_contract_source(self):
+        case = self._yes_prior("yes", self.YES_KEPT)
+        case["prior_forecast"]["yes_basis"] = [{"source_id": "made.up_source", "claim": "x"}]
+        self.assert_fails(**case, contains="prior forecast yes_basis 'made.up_source'")
 
     def test_legacy_prior_requires_legacy_line(self):
         report = replace_once(

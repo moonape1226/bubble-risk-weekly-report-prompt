@@ -90,9 +90,14 @@
       "prior_date",
       "prior_answer",
       "flip_evidence",
+      "yes_basis",
       "r1_drawdown_pct",
       "resolution"
     ],
+    "prior_optional_fields": [
+      "yes_basis"
+    ],
+    "yes_basis_max_items": 3,
     "legacy_prior_file": "score.json",
     "current_file": "forecast.json"
   },

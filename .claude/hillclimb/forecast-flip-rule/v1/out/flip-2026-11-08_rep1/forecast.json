@@ -1,0 +1,20 @@
+{
+  "date": "2026-11-08",
+  "iso_week": "2026-W45",
+  "weekday": "Sunday",
+  "timezone": "Asia/Taipei",
+  "question_version": 1,
+  "resolution_version": 1,
+  "answer": "yes",
+  "horizon_end": "2027-05-09",
+  "prior_date": "2026-10-18",
+  "prior_answer": "yes",
+  "flip_evidence": [],
+  "yes_basis": [
+    {"source_id": "valuation.ndx_drawdown", "claim": "NASDAQ-100 已自 2026-10-06 高點回撤 13.56%，距 R1 門檻只差約 13.2% 跌幅，且回撤在 VIX 28、Fear & Greed 極度恐懼下仍在加速。"},
+    {"source_id": "valuation.ai_credit_schism", "claim": "R3 候選借款人 CoreWeave 債券殖利率升破 16%、5 年 CDS 突破 1289 bps，信用市場已按 distressed 水位定價，窗口內出現 distressed exchange 或違約的路徑實質存在。"},
+    {"source_id": "ai.hyperscaler_capex", "claim": "Microsoft 已於 2026-10-29 下修資本支出指引（約 175 → 約 170），R2 四家中第一家已下修，窗口內另含兩次財報季。"}
+  ],
+  "r1_drawdown_pct": 13.56,
+  "resolution": null
+}

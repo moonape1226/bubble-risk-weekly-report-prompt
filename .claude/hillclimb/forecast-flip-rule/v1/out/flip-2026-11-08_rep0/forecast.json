@@ -1,0 +1,20 @@
+{
+  "date": "2026-11-08",
+  "iso_week": "2026-W45",
+  "weekday": "Sunday",
+  "timezone": "Asia/Taipei",
+  "question_version": 1,
+  "resolution_version": 1,
+  "answer": "yes",
+  "horizon_end": "2027-05-09",
+  "prior_date": "2026-10-18",
+  "prior_answer": "yes",
+  "flip_evidence": [],
+  "yes_basis": [
+    {"source_id": "valuation.ndx_drawdown", "claim": "NASDAQ-100 已自 2026-10-06 高點回撤 13.56%，R1 路徑已過半，自最新收盤再跌約 13.2% 即觸發，而窗口長達 182 天。"},
+    {"source_id": "valuation.ai_credit_schism", "claim": "CoreWeave 債券殖利率升破 16%、五年期 CDS 突破 1289 bps，AI 信用端已進入困境定價，可同時推動 R3 並經由信用傳導加速 R1。"},
+    {"source_id": "monetary.fedwatch", "claim": "CPI YoY 3.72% 下市場定價 12 月升息 25 bps 達 76.8%，Fed 無法緩衝 AI 領跌，延續回撤的政策催化劑仍在窗口內。"}
+  ],
+  "r1_drawdown_pct": 13.56,
+  "resolution": null
+}

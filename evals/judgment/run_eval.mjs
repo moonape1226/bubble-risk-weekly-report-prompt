@@ -282,7 +282,12 @@ async function runCase(input, ctx) {
   const { code, out, err } = await runClaude(args, { cwd: ws, input: msg, timeoutMs });
   const p = parseStream(out, msg);
   if (!p.result || code !== 0) {
-    const e = new Error(`claude -p exited ${code}: ${termSafe(err).slice(-300)}`);
+    // API errors (429 / 529 / 5xx) arrive in the result event, not on stderr;
+    // withBackoff needs them in the message/status to classify them as transient.
+    const apiErr = p.result?.is_error ? [p.result.result ?? p.result.subtype, ...(Array.isArray(p.result.errors) ? p.result.errors : [])].filter(Boolean).join(' ') : '';
+    const e = new Error(`claude -p exited ${code}: ${termSafe(`${err} ${apiErr}`.trim()).slice(-300)}`);
+    const st = Number(p.result?.api_error_status ?? apiErr.match(/API Error: (\d{3})/)?.[1]);
+    if (st) e.status = st;
     e.failure_class = p.result ? 'harness' : 'timeout_or_crash';
     e.model = p.model; e.usage = usageOf(p.result?.usage);
     throw e;
@@ -341,7 +346,7 @@ Criteria:
 - both_sides: each evidence section leads with genuinely strong evidence for its side that is present in the inputs; fail if an obviously stronger available item for a side is omitted while weaker ones are listed, or a bullet is a strawman or irrelevant to R1-R3.
 - decision: a yes requires concrete input evidence that some path is under way or likely to complete within 182 days (valuation extremes alone are not enough); a no fails only if the inputs contain such evidence and the report ignores or dismisses it without reason. The decisive reason given in 結論 must exist in the inputs.
 - gaps: every source the report marks ⛔ FETCH FAILED, and every failure visible in the inputs (macro blocks or series with status fetch_failed, evidence outcomes reporting a technical failure) that bears on R1-R3, is named in 資料缺漏與不確定性 with a statement of whether it could change the answer. na when the inputs contain no failures.
-- flip: only when a prior forecast is supplied. If the answer equals the prior answer, the report must explain why evidence since prior_date did not change it; if it differs, the cited flip evidence must be dated after prior_date in the inputs and must materially change a path analysis. na when no prior forecast is supplied.`;
+- flip: only when a prior forecast is supplied. The rule is asymmetric. A no prior may become yes only when the cited flip evidence is dated after prior_date in the inputs and shows a path under way; otherwise the report keeps no and explains why the new evidence did not change it. A yes prior is re-earned every run: keeping yes requires current input evidence that still meets the yes bar, while flipping to no needs no new evidence, only a stated reason, grounded in the inputs, why the prior yes no longer holds or never met the bar. Fail if the report keeps the prior answer while its own evidence sections favour the other side. na when no prior forecast is supplied.`;
 
 const VERDICT = { type: 'object', additionalProperties: false, required: ['verdict', 'reason'],
   properties: { verdict: { type: 'string', enum: ['pass', 'fail', 'na'] }, reason: { type: 'string' } } };
@@ -392,7 +397,10 @@ async function gradeCase(input, run, ref, ctx) {
   const judge_usage = usageOf(jr?.usage);
   const judge_model = jr?.modelUsage ? Object.keys(jr.modelUsage).find(m => m.startsWith(JUDGE_MODEL)) ?? JUDGE_MODEL : JUDGE_MODEL;
   if (!verdicts || CRITERIA.some(k => !verdicts[k])) {
-    const e = new Error(`judge output unparsable (exit ${j.code})`);
+    const apiErr = jr?.is_error ? [jr.result ?? jr.subtype, ...(Array.isArray(jr.errors) ? jr.errors : [])].filter(Boolean).join(' ') : '';
+    const e = new Error(`judge output unparsable (exit ${j.code})${apiErr ? ': ' + termSafe(apiErr).slice(-300) : ''}`);
+    const st = Number(jr?.api_error_status ?? apiErr.match(/API Error: (\d{3})/)?.[1]);
+    if (st) e.status = st;
     rmSync(gdir, { recursive: true, force: true });
     e.failure_class = 'grader'; e.judge_model = judge_model; e.judge_usage = judge_usage;
     throw e;
@@ -490,7 +498,7 @@ function checkHarness(statePath, st, approve) {
   const lockfiles = [...new Set([dirname(self), process.cwd()].flatMap(d =>
     ['package-lock.json', 'bun.lock', 'bun.lockb', 'yarn.lock', 'pnpm-lock.yaml'].map(f => join(d, f))))]
     .filter(f => existsSync(f));
-  const paths = [...new Set([self, ...lockfiles, ...listed.map(p => resolve(p))])].sort();
+  const paths = [...new Set([self, ...lockfiles, ...listed.map(p => resolve(REPO, p))])].sort();
   const h = createHash('sha256');
   const hashed = [];
   for (const p of paths) {

@@ -73,6 +73,11 @@ class ReportContractTests(unittest.TestCase):
         fields = contract["forecast_schema"]["current_fields"]
         self.assertEqual(len(fields), len(set(fields)))
         self.assertEqual(fields[-1], "resolution")
+        schema = contract["forecast_schema"]
+        self.assertIn("yes_basis", fields)
+        self.assertLessEqual(set(schema["prior_optional_fields"]), set(fields))
+        self.assertNotIn("answer", schema["prior_optional_fields"])
+        self.assertGreaterEqual(schema["yes_basis_max_items"], 1)
         removed = {
             "dimensions", "tiers", "anchors", "anchor_features", "regimes",
             "trigger_states", "trigger_reason_codes", "score_schema", "direction_thresholds", "weighted_score_header",
